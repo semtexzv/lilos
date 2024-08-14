@@ -24,6 +24,7 @@
 // because it isn't otherwise referenced in code!
 extern crate panic_halt;
 
+use lilos::time::SysTick;
 use lilos_rp::gpio::Level;
 
 // For RP2040, we need to include a bootloader. The general Cargo build process
@@ -60,10 +61,11 @@ fn main() -> ! {
 
     // Configure the systick timer for 1kHz ticks at the default ROSC speed of
     // _roughly_ 6 MHz.
-    lilos::time::initialize_sys_tick(&mut cp.SYST, 6_000_000);
+    let systick = SysTick::new(&mut cp.SYST, 6_000_000);
     // Set up and run the scheduler with a single task.
     lilos::exec::run_tasks(
         &mut [blink],           // <-- array of tasks
+        &[&systick],
         lilos::exec::ALL_TASKS, // <-- which to start initially
     )
 }

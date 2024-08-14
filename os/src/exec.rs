@@ -145,19 +145,17 @@ use pin_project::pin_project;
 
 use crate::util::Captures;
 
-// Despite the untangling of exec and time that happened in the 1.0 release, we
-// still have some intimate dependencies between the modules. You'll see a few
-// other cfg(feature = "systick") lines below.
-cfg_if::cfg_if! {
-    if #[cfg(feature = "systick")] {
-        use portable_atomic::AtomicBool;
-        use core::ptr::{addr_of, addr_of_mut};
-
-        use lilos_list::List;
-        use core::mem::MaybeUninit;
-        use crate::time::TickTime;
-    }
+/// In order to allow custom timer implementations (apart from systick), this trait can be used to
+/// hook into the executor scheduling process.
+pub trait Hooks {
+    /// Run before scheduler is started on `core`
+    fn init_core(&self, core: usize);
+    /// Run before we poll woken up tasks on `core`
+    fn before_poll(&self, core: usize);
+    /// Run before we poll woken up tasks on `core`
+    fn after_poll(&self, core: usize);
 }
+
 
 /// Accumulates bitmasks from wakers as they are invoked. The executor
 /// atomically checks and clears this at each iteration.
@@ -343,12 +341,14 @@ impl Interrupts {
 /// override this behavior, see [`run_tasks_with_idle`].
 pub fn run_tasks(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
+    hooks: &[&dyn Hooks],
     initial_mask: usize,
 ) -> ! {
     // Safety: we're passing Interrupts::Masked, the always-safe option
     unsafe {
         run_tasks_with_preemption_and_idle(
             futures,
+            hooks,
             initial_mask,
             Interrupts::Masked,
             || {
@@ -380,6 +380,7 @@ pub fn run_tasks(
 /// See [`run_tasks`] for more details.
 pub fn run_tasks_with_idle(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
+    hooks: &mut [&dyn Hooks],
     initial_mask: usize,
     idle_hook: impl FnMut(),
 ) -> ! {
@@ -387,6 +388,7 @@ pub fn run_tasks_with_idle(
     unsafe {
         run_tasks_with_preemption_and_idle(
             futures,
+            hooks,
             initial_mask,
             Interrupts::Masked,
             idle_hook,
@@ -416,6 +418,7 @@ pub fn run_tasks_with_idle(
 /// as being ISR safe, such as `Notify::notify`, can be used from ISRs.
 pub unsafe fn run_tasks_with_preemption(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
+    hooks: &mut [&dyn Hooks],
     initial_mask: usize,
     interrupts: Interrupts,
 ) -> ! {
@@ -423,6 +426,7 @@ pub unsafe fn run_tasks_with_preemption(
     unsafe {
         run_tasks_with_preemption_and_idle(
             futures,
+            hooks,
             initial_mask,
             interrupts,
             cortex_m::asm::wfi,
@@ -455,6 +459,7 @@ pub unsafe fn run_tasks_with_preemption(
 /// as being ISR safe, such as `Notify::notify`, can be used from ISRs.
 pub unsafe fn run_tasks_with_preemption_and_idle(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
+    hooks: &[&dyn Hooks],
     initial_mask: usize,
     interrupts: Interrupts,
     mut idle_hook: impl FnMut(),
@@ -485,37 +490,12 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
 
     WAKE_BITS.store(initial_mask, Ordering::SeqCst);
 
-    // Initialize the timer list.
-    #[cfg(feature = "systick")]
-    {
-        let already_initialized = TIMER_LIST_READY.swap(true, Ordering::SeqCst);
-        // Catch any attempt to do this twice. Would doing this twice be bad?
-        // Not necessarily. But it would be damn suspicious.
-        cheap_assert!(!already_initialized);
+    hooks.iter().for_each(|plug| plug.init_core(0));
 
-        // Safety: by successfully flipping the initialization flag, we know
-        // we can do this without aliasing; being in a single-threaded context
-        // right now means we can do it without racing.
-        let timer_list = unsafe { &mut *addr_of_mut!(TIMER_LIST) };
 
-        // Initialize the list node itself.
-        timer_list.write(List::new());
-
-        // The list is initialized; we can now produce _shared_ references to
-        // it. Because it won't move again, we can pin those references.
-    }
-
-    #[cfg(feature = "systick")]
-    let tl = get_timer_list();
     loop {
         interrupts.scope(|| {
-            #[cfg(feature = "systick")]
-            {
-                // Scan for any expired timers.
-                let now = TickTime::now();
-                tl.wake_while(|&t| t <= now);
-            }
-
+            hooks.iter().for_each(|plug| plug.before_poll(0));
             // Capture and reset wake bits, then process any 1s.
             // TODO: this loop visits every future testing for 1 bits; it would
             // almost certainly be faster to visit the futures corresponding to
@@ -529,6 +509,7 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
                     }
                 }
             }
+            hooks.iter().for_each(|plug| plug.after_poll(0));
             // If none of the futures woke each other, we're relying on an
             // interrupt to set bits -- so we can sleep waiting for it.
             if WAKE_BITS.load(Ordering::SeqCst) == 0 {
@@ -878,53 +859,6 @@ pub fn wake_tasks_by_mask(mask: usize) {
 #[inline(always)]
 pub fn wake_task_by_index(index: usize) {
     wake_tasks_by_mask(wake_mask_for_index(index));
-}
-
-/// Tracks whether the timer list has been initialized.
-#[cfg(feature = "systick")]
-static TIMER_LIST_READY: AtomicBool = AtomicBool::new(false);
-
-/// Storage for the timer list.
-#[cfg(feature = "systick")]
-static mut TIMER_LIST: MaybeUninit<List<TickTime>> = MaybeUninit::uninit();
-
-/// Panics if called from an interrupt service routine (ISR). This is used to
-/// prevent OS features that are unavailable to ISRs from being used in ISRs.
-#[cfg(feature = "systick")]
-fn assert_not_in_isr() {
-    let psr_value = cortex_m::register::apsr::read().bits();
-    // Bottom 9 bits are the exception number, which are 0 in Thread mode.
-    if psr_value & 0x1FF != 0 {
-        panic!();
-    }
-}
-
-/// Nabs a reference to the global timer list.
-///
-/// # Preconditions
-///
-/// - Must not be called from an interrupt.
-/// - Must only be called once the timer list has been initialized, which is to
-///   say, from within a task.
-#[cfg(feature = "systick")]
-pub(crate) fn get_timer_list() -> Pin<&'static List<TickTime>> {
-    // Prevent this from being used from interrupt context.
-
-    assert_not_in_isr();
-
-    // Ensure that the timer list has been initialized.
-    cheap_assert!(TIMER_LIST_READY.load(Ordering::Acquire));
-
-    // Since we know we're not running concurrently with the scheduler setup, we
-    // can freely vend pin references to the now-immortal timer list.
-    //
-    // Safety: &mut references to TIMER_LIST have stopped after initialization.
-    let list_ref = unsafe { &*addr_of!(TIMER_LIST) };
-    // Safety: we know the list has been initialized because we checked
-    // TIMER_LIST_READY, above. We also know that the list trivially meets the
-    // pin criterion, since it's immortal and always referenced by shared
-    // reference at this point.
-    unsafe { Pin::new_unchecked(list_ref.assume_init_ref()) }
 }
 
 /// Returns a future that will be pending exactly once before resolving.

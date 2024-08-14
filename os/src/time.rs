@@ -82,15 +82,18 @@
 //! this, please file an issue.
 
 use core::future::Future;
+use core::mem::MaybeUninit;
 use core::ops::{Add, AddAssign};
 use core::pin::Pin;
+use core::ptr::{addr_of, addr_of_mut};
 use core::task::{Context, Poll};
 use core::time::Duration;
-use portable_atomic::{AtomicU32, Ordering};
+use portable_atomic::{AtomicBool, AtomicU32, Ordering};
 
 use cortex_m::peripheral::{syst::SystClkSource, SYST};
 use cortex_m_rt::exception;
 use pin_project::pin_project;
+use lilos_list::List;
 
 /// Bottom 32 bits of the tick counter. Updated by ISR.
 static TICK: AtomicU32 = AtomicU32::new(0);
@@ -99,23 +102,96 @@ static EPOCH: AtomicU32 = AtomicU32::new(0);
 /// How much to increment the tick counter by.
 static INCR: AtomicU32 = AtomicU32::new(0);
 
-/// Sets up the tick counter for 1kz operation, assuming a CPU core clock of
-/// `clock_hz`.
+
+/// Tracks whether the timer list has been initialized.
+static TIMER_LIST_READY: AtomicBool = AtomicBool::new(false);
+
+/// Storage for the timer list.
+static mut TIMER_LIST: MaybeUninit<List<TickTime>> = MaybeUninit::uninit();
+
+/// Panics if called from an interrupt service routine (ISR). This is used to
+/// prevent OS features that are unavailable to ISRs from being used in ISRs.
+#[cfg(feature = "systick")]
+fn assert_not_in_isr() {
+    let psr_value = cortex_m::register::apsr::read().bits();
+    // Bottom 9 bits are the exception number, which are 0 in Thread mode.
+    if psr_value & 0x1FF != 0 {
+        panic!();
+    }
+}
+
+/// Nabs a reference to the global timer list.
 ///
-/// If you use this module in your application, call this before
-/// [`run_tasks`][crate::exec::run_tasks] (or a fancier version of `run_tasks`)
-/// to set up the timer for monotonic operation.
-pub fn initialize_sys_tick(syst: &mut SYST, clock_hz: u32) {
-    let cycles = clock_hz / 1_000;
-    INCR.store(1_000, Ordering::Relaxed);
+/// # Preconditions
+///
+/// - Must not be called from an interrupt.
+/// - Must only be called once the timer list has been initialized, which is to
+///   say, from within a task.
+#[cfg(feature = "systick")]
+pub(crate) fn get_timer_list() -> Pin<&'static List<TickTime>> {
+    // Prevent this from being used from interrupt context.
 
-    syst.disable_counter();
-    syst.set_clock_source(SystClkSource::Core);
+    assert_not_in_isr();
 
-    syst.set_reload(cycles - 1);
-    syst.clear_current();
-    syst.enable_interrupt();
-    syst.enable_counter();
+    // Ensure that the timer list has been initialized.
+    cheap_assert!(TIMER_LIST_READY.load(Ordering::Acquire));
+
+    // Since we know we're not running concurrently with the scheduler setup, we
+    // can freely vend pin references to the now-immortal timer list.
+    //
+    // Safety: &mut references to TIMER_LIST have stopped after initialization.
+    let list_ref = unsafe { &*addr_of!(TIMER_LIST) };
+    // Safety: we know the list has been initialized because we checked
+    // TIMER_LIST_READY, above. We also know that the list trivially meets the
+    // pin criterion, since it's immortal and always referenced by shared
+    // reference at this point.
+    unsafe { Pin::new_unchecked(list_ref.assume_init_ref()) }
+}
+
+/// Implements executor hooks to aallow asynchronous delays using the systick timer. Accuracy should be in milliseconds
+#[derive(Debug)]
+pub struct SysTick;
+
+impl SysTick {
+    pub fn new(syst: &mut SYST, clock_hz: u32) -> Self {
+        let cycles = clock_hz / 1_000;
+        INCR.store(1_000, Ordering::Relaxed);
+
+        syst.disable_counter();
+        syst.set_clock_source(SystClkSource::Core);
+
+        syst.set_reload(cycles - 1);
+        syst.clear_current();
+        syst.enable_interrupt();
+        syst.enable_counter();
+        SysTick
+    }
+}
+
+impl crate::exec::Hooks for SysTick {
+    fn init_core(&self, _: usize) {
+        let already_initialized = TIMER_LIST_READY.swap(true, Ordering::SeqCst);
+        // Catch any attempt to do this twice. Would doing this twice be bad?
+        // Not necessarily. But it would be damn suspicious.
+        cheap_assert!(!already_initialized);
+
+        // Safety: by successfully flipping the initialization flag, we know
+        // we can do this without aliasing; being in a single-threaded context
+        // right now means we can do it without racing.
+        let timer_list = unsafe { &mut *addr_of_mut!(TIMER_LIST) };
+
+        // Initialize the list node itself.
+        timer_list.write(List::new());
+    }
+
+    fn before_poll(&self, _: usize) {
+        // Scan for any expired timers.
+        let now = TickTime::now();
+        get_timer_list().wake_while(|&t| t <= now);
+    }
+
+    fn after_poll(&self, core: usize) {
+    }
 }
 
 /// Represents a moment in time by the value of the system tick counter.
@@ -292,7 +368,7 @@ pub async fn sleep_until(deadline: TickTime) {
 
     // Insert our node into the pending timer list. If we get cancelled, the
     // node will detach itself as it's being dropped.
-    crate::exec::get_timer_list().join(deadline).await
+    get_timer_list().join(deadline).await
 }
 
 /// Sleeps until the system time has increased by `d`.
@@ -508,7 +584,7 @@ impl embedded_hal_async::delay::DelayNs for Delay {
         }
     }
 
-    async fn delay_us(&mut self, mut us: u32) {
+    async fn delay_us(&mut self, us: u32) {
         sleep_for(Micros(us as u64)).await;
     }
 
