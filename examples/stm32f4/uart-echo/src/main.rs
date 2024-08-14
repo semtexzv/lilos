@@ -7,7 +7,7 @@
 //!
 //! This defaults to using USART2, which is the one easily accessible on my
 //! breakout board. Bytes received at 115200 baud will be retransmitted at the
-//! same rate. 
+//! same rate.
 //!
 //! Wiring:
 //! - PA2 is USART2 TX
@@ -56,16 +56,16 @@
 extern crate panic_halt;
 
 use core::convert::Infallible;
+use core::future::Future;
 use core::mem::MaybeUninit;
 use core::pin::pin;
-use core::future::Future;
 
-use device::gpio::vals::{Ot, Moder};
+use device::gpio::vals::{Moder, Ot};
 use stm32_metapac::{self as device, interrupt};
 
 use lilos::exec::Notify;
 use lilos::spsc;
-use lilos::time::{Millis, PeriodicGate};
+use lilos::time::{Micros, PeriodicGate};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Entry point
@@ -89,7 +89,9 @@ fn main() -> ! {
     ));
 
     device::RCC.ahb1enr().modify(|w| w.set_gpioden(true));
-    device::GPIOD.moder().modify(|w| w.set_moder(15, Moder::OUTPUT));
+    device::GPIOD
+        .moder()
+        .modify(|w| w.set_moder(15, Moder::OUTPUT));
 
     // Set up and run the scheduler.
     lilos::time::initialize_sys_tick(&mut cp.SYST, CLOCK_HZ);
@@ -119,7 +121,7 @@ fn heartbeat(
     // and don't need to retain access to it. This distinction is hard (or
     // impossible?) to express with an `async fn`.
 
-    const PERIOD: Millis = Millis(500);
+    const PERIOD: Micros = Micros(500);
 
     // Configure our output pin.
     rcc.ahb1enr().modify(|w| w.set_gpioden(true));
@@ -207,7 +209,9 @@ async fn usart_echo(
     // futures, giving type (!, !), which Rust doesn't think is uninhabited --
     // by extracting either one of the !s we prove that code past this point is
     // unreachable.
-    futures::future::join(echo_rx(usart, q_push), echo_tx(usart, q_pop)).await.0
+    futures::future::join(echo_rx(usart, q_push), echo_tx(usart, q_pop))
+        .await
+        .0
 }
 
 /// Echo receive task. Moves bytes from `usart` to `q`.
@@ -224,7 +228,7 @@ async fn echo_rx(
 async fn echo_tx(
     usart: device::usart::Usart,
     mut q: spsc::Popper<'_, u8>,
-) -> Infallible  {
+) -> Infallible {
     loop {
         send(usart, q.pop().await).await;
     }

@@ -5,12 +5,12 @@
 use lilos_handoff::Handoff;
 
 pub async fn test_create_drop() {
-    let handoff = Handoff::<usize>::new(); 
+    let handoff = Handoff::<usize>::new();
     drop(handoff);
 }
 
 pub async fn test_split_drop() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     {
         let (_push, _pop) = handoff.split();
     }
@@ -18,7 +18,7 @@ pub async fn test_split_drop() {
 }
 
 pub async fn test_push_pop() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (mut push, mut pop) = handoff.split();
 
     let mut xfer_val = None;
@@ -35,7 +35,7 @@ pub async fn test_push_pop() {
 }
 
 pub async fn test_push_cancel() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (mut push, _pop) = handoff.split();
 
     drop(push.push(42));
@@ -43,7 +43,7 @@ pub async fn test_push_cancel() {
 }
 
 pub async fn test_push_cancel_after_block() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (mut push, _pop) = handoff.split();
 
     let pp = push.push(42);
@@ -55,7 +55,7 @@ pub async fn test_push_cancel_after_block() {
 }
 
 pub async fn test_push_cancel_after_success() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (mut push, mut pop) = handoff.split();
 
     let pp = push.push(42);
@@ -71,7 +71,7 @@ pub async fn test_push_cancel_after_success() {
 }
 
 pub async fn test_pop_cancel() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (_push, mut pop) = handoff.split();
 
     drop(pop.pop());
@@ -79,7 +79,7 @@ pub async fn test_pop_cancel() {
 }
 
 pub async fn test_pop_cancel_after_block() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (_push, mut pop) = handoff.split();
 
     let pp = pop.pop();
@@ -91,7 +91,7 @@ pub async fn test_pop_cancel_after_block() {
 }
 
 pub async fn test_pop_cancel_after_success() {
-    let mut handoff = Handoff::<usize>::new(); 
+    let mut handoff = Handoff::<usize>::new();
     let (mut push, mut pop) = handoff.split();
 
     let pp = pop.pop();

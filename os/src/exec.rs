@@ -138,8 +138,8 @@ use core::convert::Infallible;
 use core::future::Future;
 use core::mem;
 use core::pin::Pin;
-use portable_atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use portable_atomic::{AtomicUsize, Ordering};
 
 use pin_project::pin_project;
 
@@ -195,9 +195,7 @@ fn waker_for_task(index: usize) -> Waker {
     // don't meet the Waker contract or are incompatible. In our case, our
     // vtable functions are actually entirely safe, since we're passing an
     // integer as a pointer.
-    unsafe {
-        Waker::from_raw(RawWaker::new(mask as *const (), &VTABLE))
-    }
+    unsafe { Waker::from_raw(RawWaker::new(mask as *const (), &VTABLE)) }
 }
 
 /// Exploits our known Waker structure to extract the notification mask from a
@@ -221,10 +219,7 @@ fn extract_mask(waker: &Waker) -> usize {
     // unsafe.
     let ptr_first = unsafe {
         let (cell0, _) = mem::transmute::<Waker, (usize, usize)>(
-            Waker::from_raw(RawWaker::new(
-                1234 as *const (),
-                &VTABLE,
-            ))
+            Waker::from_raw(RawWaker::new(1234 as *const (), &VTABLE)),
         );
         cell0 == 1234usize
     };
@@ -245,39 +240,12 @@ fn extract_mask(waker: &Waker) -> usize {
     }
 }
 
-/// Used to construct wakers do nothing, as a placeholder.
-static NOOP_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    |x| RawWaker::new(x, &NOOP_VTABLE), // clone
-    |_| (),                             // wake
-    |_| (),                             // wake_by_ref
-    |_| (),                             // drop
-);
-
-/// Returns a [`Waker`] that doesn't do anything and costs nothing to `clone`.
-/// This is useful as a placeholder before a *real* `Waker` becomes available.
-/// You probably don't need this unless you're building your own wake lists.
-#[deprecated(
-    since = "1.2.0",
-    note = "was only ever used with List which is now deprecated",
-)]
-pub fn noop_waker() -> Waker {
-    // Safety: Waker::from_raw is unsafe because the Waker can do weird and
-    // destructive stuff if either the pointer, or the vtable functions, don't
-    // meet its contract. Our no-op functions _trivially_ meet its contract.
-    unsafe {
-        Waker::from_raw(RawWaker::new(core::ptr::null(), &NOOP_VTABLE))
-    }
-}
-
 /// Polls `future` in a context where the `Waker` will signal the task with
 /// index `index`.
-fn poll_task(
-    index: usize,
-    future: Pin<&mut dyn Future<Output = Infallible>>,
-) {
+fn poll_task(index: usize, future: Pin<&mut dyn Future<Output = Infallible>>) {
     match future.poll(&mut Context::from_waker(&waker_for_task(index))) {
         Poll::Pending => (),
-        Poll::Ready(never) => match never {}
+        Poll::Ready(never) => match never {},
     }
 }
 
@@ -494,7 +462,8 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
     // Record the task futures for debugger access.
     {
         // Degrade &mut[] to *mut[]
-        let futures_ptr: *mut [Pin<&mut dyn Future<Output = Infallible>>] = futures;
+        let futures_ptr: *mut [Pin<&mut dyn Future<Output = Infallible>>] =
+            futures;
         // Change interpretation of the Pins; this assumes that &mut and *mut
         // have equivalent representation! But we want to store *mut into the
         // static because
@@ -503,7 +472,8 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
         // 2. It relieves us from having to pretend the array has static
         //    lifetime, which it does _not._ Casting it to `&'static mut` would
         //    be wrong.
-        let futures_ptr: *mut [Pin<*mut dyn Future<Output = Infallible>>] = futures_ptr as _;
+        let futures_ptr: *mut [Pin<*mut dyn Future<Output = Infallible>>] =
+            futures_ptr as _;
         // Stash the task future array in a known location.
         //
         // Safety: this is written by code but never read back, so the fact that
@@ -518,8 +488,7 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
     // Initialize the timer list.
     #[cfg(feature = "systick")]
     {
-        let already_initialized =
-            TIMER_LIST_READY.swap(true, Ordering::SeqCst);
+        let already_initialized = TIMER_LIST_READY.swap(true, Ordering::SeqCst);
         // Catch any attempt to do this twice. Would doing this twice be bad?
         // Not necessarily. But it would be damn suspicious.
         cheap_assert!(!already_initialized);
@@ -527,9 +496,7 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
         // Safety: by successfully flipping the initialization flag, we know
         // we can do this without aliasing; being in a single-threaded context
         // right now means we can do it without racing.
-        let timer_list = unsafe {
-            &mut *addr_of_mut!(TIMER_LIST)
-        };
+        let timer_list = unsafe { &mut *addr_of_mut!(TIMER_LIST) };
 
         // Initialize the list node itself.
         timer_list.write(List::new());
@@ -555,18 +522,18 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
             // 1 bits instead. I have avoided this for now because of the
             // increased complexity.
             let mask = WAKE_BITS.swap(0, Ordering::SeqCst);
-            for (i, f) in futures.iter_mut().enumerate() {
-                if mask & wake_mask_for_index(i) != 0 {
-                    poll_task(i, f.as_mut());
+            if mask != 0 {
+                for (i, f) in futures.iter_mut().enumerate() {
+                    if mask & wake_mask_for_index(i) != 0 {
+                        poll_task(i, f.as_mut());
+                    }
                 }
             }
-
             // If none of the futures woke each other, we're relying on an
             // interrupt to set bits -- so we can sleep waiting for it.
             if WAKE_BITS.load(Ordering::SeqCst) == 0 {
                 idle_hook();
             }
-
         });
 
         // Now interrupts are enabled for a brief period before diving back in.
@@ -589,7 +556,9 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
 /// Note that the `#[used]` annotation is load-bearing here -- without it the
 /// compiler will happily throw the variable away, confusing the debugger.
 #[used]
-static mut TASK_FUTURES: Option<*mut [Pin<*mut dyn Future<Output = Infallible>>]> = None;
+static mut TASK_FUTURES: Option<
+    *mut [Pin<*mut dyn Future<Output = Infallible>>],
+> = None;
 
 /// Constant that can be passed to `run_tasks` and `wake_tasks_by_mask` to mean
 /// "all tasks."
@@ -716,7 +685,7 @@ impl Notify {
     /// be preceded by some task calling `self.notify()`.
     ///
     /// The meaning of `cond` "passing" is defined by the [`TestResult`] trait.
-    /// 
+    ///
     /// - In the easiest case, `cond` should return a `bool`. `until` will
     ///   resolve when `cond` returns `true`.
     ///
@@ -741,17 +710,11 @@ impl Notify {
     ///    improve cancel safety by avoiding the move, if possible.
     /// 2. Passing a closure you received as `cond` instead of making a new one.
     ///    In this case, consider passing the closure by reference.
-    pub fn until<F, T: TestResult>(
-        &self,
-        cond: F,
-    ) -> Until<'_, F>
+    pub fn until<F, T: TestResult>(&self, cond: F) -> Until<'_, F>
     where
         F: FnMut() -> T,
     {
-        Until {
-            cond,
-            notify: self,
-        }
+        Until { cond, notify: self }
     }
 
     /// Waits for a condition to become true, in a way that tolerates race
@@ -785,17 +748,11 @@ impl Notify {
     ///    improve cancel safety by avoiding the move, if possible.
     /// 2. Passing a closure you received as `cond` instead of making a new one.
     ///    In this case, consider passing the closure by reference.
-    pub fn until_racy<F, T: TestResult>(
-        &self,
-        cond: F,
-    ) -> UntilRacy<'_, F>
+    pub fn until_racy<F, T: TestResult>(&self, cond: F) -> UntilRacy<'_, F>
     where
         F: FnMut() -> T,
     {
-        UntilRacy {
-            cond,
-            notify: self,
-        }
+        UntilRacy { cond, notify: self }
     }
 
     /// Subscribes to `notify` and blocks until the task is awoken. This may
@@ -808,9 +765,7 @@ impl Notify {
     ///
     /// Dropping this future will leave the current task subscribed to `self`
     /// (meaning one potential spurious wakeup in the future is possible).
-    pub fn until_next(
-        &self,
-    ) -> impl Future<Output = ()> + Captures<&'_ Self> {
+    pub fn until_next(&self) -> impl Future<Output = ()> + Captures<&'_ Self> {
         let mut setup = false;
         self.until(move || mem::replace(&mut setup, true))
     }
@@ -860,8 +815,9 @@ pub struct Until<'n, F> {
 }
 
 impl<F, T> Future for Until<'_, F>
-    where F: FnMut() -> T,
-          T: TestResult,
+where
+    F: FnMut() -> T,
+    T: TestResult,
 {
     type Output = T::Output;
 
@@ -887,8 +843,9 @@ pub struct UntilRacy<'n, F> {
 }
 
 impl<F, T> Future for UntilRacy<'_, F>
-    where F: FnMut() -> T,
-          T: TestResult,
+where
+    F: FnMut() -> T,
+    T: TestResult,
 {
     type Output = T::Output;
 
@@ -962,16 +919,12 @@ pub(crate) fn get_timer_list() -> Pin<&'static List<TickTime>> {
     // can freely vend pin references to the now-immortal timer list.
     //
     // Safety: &mut references to TIMER_LIST have stopped after initialization.
-    let list_ref = unsafe {
-        &*addr_of!(TIMER_LIST)
-    };
+    let list_ref = unsafe { &*addr_of!(TIMER_LIST) };
     // Safety: we know the list has been initialized because we checked
     // TIMER_LIST_READY, above. We also know that the list trivially meets the
     // pin criterion, since it's immortal and always referenced by shared
     // reference at this point.
-    unsafe {
-        Pin::new_unchecked(list_ref.assume_init_ref())
-    }
+    unsafe { Pin::new_unchecked(list_ref.assume_init_ref()) }
 }
 
 /// Returns a future that will be pending exactly once before resolving.
@@ -996,7 +949,10 @@ struct YieldCpu {
 impl Future for YieldCpu {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
         if mem::replace(&mut self.polled, true) {
             Poll::Ready(())
         } else {

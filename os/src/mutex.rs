@@ -134,9 +134,7 @@ impl<T> Mutex<T> {
     /// This is the cheaper, non-blocking version of [`Mutex::lock`].
     pub fn try_lock(self: Pin<&Self>) -> Option<ActionPermit<'_, T>> {
         if self.state.fetch_or(1, Ordering::Acquire) == 0 {
-            Some(ActionPermit {
-                mutex: self,
-            })
+            Some(ActionPermit { mutex: self })
         } else {
             None
         }
@@ -207,9 +205,8 @@ impl<T> Mutex<T> {
         }
 
         let p = self.project_ref();
-        p.waiters.join_with_cleanup(
-            (),
-            || {
+        p.waiters
+            .join_with_cleanup((), || {
                 // Safety: if we are evicted from the wait list, which is
                 // the only time this cleanup routine is called, then we own
                 // the mutex and are responsible for unlocking it, though we
@@ -217,8 +214,8 @@ impl<T> Mutex<T> {
                 unsafe {
                     self.unlock();
                 }
-            },
-        ).await;
+            })
+            .await;
         // We've been booted out of the waiter list, which (by construction)
         // only happens in `unlock`. Meaning, someone just released the
         // mutex and it's our turn. However, they should _not_ have cleared
@@ -226,9 +223,7 @@ impl<T> Mutex<T> {
         // `try_lock` which expects to find the flag clear.
         debug_assert_eq!(self.state.load(Ordering::Acquire), 1);
 
-        ActionPermit {
-            mutex: self,
-        }
+        ActionPermit { mutex: self }
     }
 
     /// Grabs a reference to the contents of the mutex.
@@ -247,7 +242,10 @@ impl<T> Mutex<T> {
     }
 }
 
-#[deprecated(since = "1.2.0", note = "old-style initialization is complicated, see Mutex::create")]
+#[deprecated(
+    since = "1.2.0",
+    note = "old-style initialization is complicated, see Mutex::create"
+)]
 impl<T> Mutex<T> {
     /// Returns an initialized but invalid mutex.
     ///
@@ -317,7 +315,9 @@ impl<T> Mutex<CancelSafe<T>> {
     /// This API can be error-prone, which is why it's only available if you've
     /// asserted your guarded data is `CancelSafe`. When possible, see if you
     /// can do the job using [`Mutex::try_lock`] instead.
-    pub fn try_lock_assuming_cancel_safe(self: Pin<&Self>) -> Option<MutexGuard<'_, T>> {
+    pub fn try_lock_assuming_cancel_safe(
+        self: Pin<&Self>,
+    ) -> Option<MutexGuard<'_, T>> {
         if self.state.fetch_or(1, Ordering::Acquire) == 0 {
             Some(MutexGuard { mutex: self })
         } else {
@@ -370,7 +370,9 @@ impl<T> Mutex<CancelSafe<T>> {
     /// - If dropped after it has been given the mutex, but before it's been
     ///   polled (and thus given a chance to notice that), it will wake the next
     ///   waiter on the mutex wait list.
-    pub async fn lock_assuming_cancel_safe(self: Pin<&Self>) -> MutexGuard<'_, T> {
+    pub async fn lock_assuming_cancel_safe(
+        self: Pin<&Self>,
+    ) -> MutexGuard<'_, T> {
         // Complete synchronously if the mutex is uncontended.
         // TODO this is repeated above the loop to avoid the cost of re-setting
         // up the wait node in every loop iteration, and to avoid setting it up
@@ -381,9 +383,8 @@ impl<T> Mutex<CancelSafe<T>> {
 
         // We'd like to put our name on the wait list, please.
         let p = self.project_ref();
-        p.waiters.join_with_cleanup(
-            (),
-            || {
+        p.waiters
+            .join_with_cleanup((), || {
                 // Safety: if we are evicted from the wait list, which is
                 // the only time this cleanup routine is called, then we own
                 // the mutex and are responsible for unlocking it, though we
@@ -391,8 +392,8 @@ impl<T> Mutex<CancelSafe<T>> {
                 unsafe {
                     self.unlock();
                 }
-            },
-        ).await;
+            })
+            .await;
         // We've been booted out of the waiter list, which (by construction)
         // only happens in `unlock`. Meaning, someone just released the
         // mutex and it's our turn. However, they should _not_ have cleared
@@ -402,7 +403,6 @@ impl<T> Mutex<CancelSafe<T>> {
 
         MutexGuard { mutex: self }
     }
-
 }
 
 /// Convenience macro for creating a pinned mutex on the stack.
@@ -449,9 +449,9 @@ macro_rules! create_mutex {
 #[macro_export]
 macro_rules! create_static_mutex {
     ($t:ty, $contents:expr) => {{
-        use $crate::portable_atomic::{AtomicBool, Ordering};
         use core::mem::{ManuallyDrop, MaybeUninit};
         use core::pin::Pin;
+        use $crate::portable_atomic::{AtomicBool, Ordering};
 
         // Flag for detecting multiple executions.
         static INIT: AtomicBool = AtomicBool::new(false);
@@ -462,24 +462,22 @@ macro_rules! create_static_mutex {
         // INIT check above. We can be confident we don't touch it again below
         // thanks to the block scope.
         let __m = unsafe {
-            static mut M: MaybeUninit<$crate::mutex::Mutex<$t>> = MaybeUninit::uninit();
+            static mut M: MaybeUninit<$crate::mutex::Mutex<$t>> =
+                MaybeUninit::uninit();
             &mut *core::ptr::addr_of_mut!(M)
         };
 
         // Safety: this requires that we discharge the obligations of Mutex::new
         // (which we'll do in a sec)
         unsafe {
-            __m.write(
-                $crate::mutex::Mutex::create($contents)
-            );
+            __m.write($crate::mutex::Mutex::create($contents));
         }
 
         // Safety: this is the only mutable reference to M that will ever exist
         // in the program, so we can pin it as long as we don't touch M again
         // below (which we do not).
-        let m: Pin<&'static _> = unsafe {
-            Pin::new_unchecked(__m.assume_init_ref())
-        };
+        let m: Pin<&'static _> =
+            unsafe { Pin::new_unchecked(__m.assume_init_ref()) };
         m
     }};
 }

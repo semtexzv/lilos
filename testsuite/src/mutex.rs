@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::pin::{Pin, pin};
+use core::pin::{pin, Pin};
 use core::task::Poll;
 
-use lilos::{create_mutex, create_static_mutex, mutex::Mutex, mutex::CancelSafe};
-use crate::{A_BIT, poll_and_assert_not_ready};
+use crate::{poll_and_assert_not_ready, A_BIT};
+use lilos::{
+    create_mutex, create_static_mutex, mutex::CancelSafe, mutex::Mutex,
+};
 
 pub async fn test_stack() {
     create_mutex!(mutex, CancelSafe(42_usize));
@@ -31,9 +33,7 @@ async fn test_mutex_wherever(mutex: Pin<&Mutex<CancelSafe<usize>>>) {
             lilos::time::sleep_for(A_BIT).await;
             *g += 2;
         },
-        async {
-            mutex.lock().await.perform(|x| x.0 += 5)
-        },
+        async { mutex.lock().await.perform(|x| x.0 += 5) },
     );
 
     assert_eq!(mutex.lock().await.perform(|x| x.0), 42 + 2 + 1 + 5);

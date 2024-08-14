@@ -27,21 +27,28 @@ lilos-handoff = { path = "extra/handoff" }
 lilos-semaphore = { path = "extra/semaphore" }
 lilos-rwlock = { path = "extra/rwlock" }
 lilos-watch = { path = "extra/watch" }
+lilos-hal = { path = "extra/hal"}
+lilos-rp = { path = "extra/rp" }
 
 # External
 cfg-if = "1.0.0"
-cortex-m = {version = "0.7.4", features = ["inline-asm"]}
-cortex-m-rt = {version = "0.7.1"}
+cortex-m = {version = "0.7.6", features = ["inline-asm"]}
+cortex-m-rt = ">=0.6.15,<0.8"
+
 cortex-m-semihosting = "0.5.0"
 pin-project = "1.1.5"
 panic-halt = "0.2.0"
 panic-semihosting = "0.6.0"
 futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
 stm32-metapac = {version = "15.0", features = ["rt", "pac"]}
-rp2040-pac = {version = "0.3", features = ["rt"]}
-rp2040-boot2 = "0.2"
+rp-pac = { git = "https://github.com/embassy-rs/rp-pac.git", rev = "a7f42d25517f7124ad3b4ed492dec8b0f50a0e6c", feature = ["rt"] }
+rp2040-pac = {version = "0.6.0", features = ["rt"]}
+rp2040-boot2 = "0.3.0"
 scopeguard = { version = "1.2.0", default-features = false }
 
+embedded-hal-02 = { package = "embedded-hal", version = "0.2.7", features = ["unproven"] }
+embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
+embedded-hal-async = { version = "1.0" }
 #
 # Before you get excited about turning on the workspace.lints table here, note
 # that it is silently ignored by our MSRV of 1.69.

@@ -30,7 +30,7 @@
 //!
 //! This is implemented as a concurrent lock-free Lamport queue. This has two
 //! implications:
-//! 
+//!
 //! 1. If you can arrange the lifetimes correctly (i.e. make the queue static)
 //!    it is actually safe to operate either Pusher or Popper from an ISR.
 //! 2. It fills up at N-1 elements because one empty slot is used as a sentinel
@@ -89,9 +89,8 @@ impl<'s, T> Queue<'s, T> {
         // memory backing `storage`, and the caller thinks of it as
         // `MaybeUninit`, meaning they aren't making assumptions about its
         // contents or dropping it when we're done.
-        let storage: &'s mut [UnsafeCell<MaybeUninit<T>>] = unsafe {
-            &mut *storage
-        };
+        let storage: &'s mut [UnsafeCell<MaybeUninit<T>>] =
+            unsafe { &mut *storage };
         Self {
             storage,
             head: AtomicUsize::new(0),
@@ -109,8 +108,14 @@ impl<'s, T> Queue<'s, T> {
     /// later -- that's fine.
     pub fn split(&mut self) -> (Pusher<'_, T>, Popper<'_, T>) {
         (
-            Pusher { q: self, _marker: NotSyncMarker::default() },
-            Popper { q: self, _marker: NotSyncMarker::default() },
+            Pusher {
+                q: self,
+                _marker: NotSyncMarker::default(),
+            },
+            Popper {
+                q: self,
+                _marker: NotSyncMarker::default(),
+            },
         )
     }
 
@@ -118,9 +123,12 @@ impl<'s, T> Queue<'s, T> {
         // This produced better code than using remainder on ARMv7-M last
         // I checked.
         let ni = i.wrapping_add(1);
-        if ni == self.storage.len() { 0 } else { ni }
+        if ni == self.storage.len() {
+            0
+        } else {
+            ni
+        }
     }
-
 }
 
 /// It's entirely possible to drop a non-empty Queue in correct code, unlike
@@ -193,9 +201,7 @@ impl<'q, T> Pusher<'q, T> {
 
         // Safety: we maintain self.q.head (and thus the value of h here) within
         // range for storage.
-        let unsafecell = unsafe {
-            self.q.storage.get_unchecked(h)
-        };
+        let unsafecell = unsafe { self.q.storage.get_unchecked(h) };
         let unsafecell_ptr = unsafecell.get();
         // Safety: this is dereferencing a raw pointer into the unsafecell,
         // which we can do because (1) the cell being between h and t implies
@@ -300,9 +306,7 @@ impl<T> Popper<'_, T> {
 
         // Safety: we always maintain self.q.tail (and thus the value of t here)
         // within bounds for storage.
-        let unsafecell = unsafe {
-            self.q.storage.get_unchecked(t)
-        };
+        let unsafecell = unsafe { self.q.storage.get_unchecked(t) };
         let unsafecell_ptr = unsafecell.get();
         // Safety: we're dereferencing the raw pointer into the UnsafeCell,
         // which we can do because (1) this cell is between t and h, so it's not

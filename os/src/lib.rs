@@ -132,7 +132,6 @@
 //! [Cancellation]: https://github.com/cbiffle/lilos/blob/main/doc/cancellation.adoc
 
 #![no_std]
-
 #![warn(
     elided_lifetimes_in_paths,
     explicit_outlives_requirements,
@@ -144,7 +143,7 @@
     trivial_numeric_casts,
     unreachable_pub,
     unsafe_op_in_unsafe_fn,
-    unused_qualifications,
+    unused_qualifications
 )]
 #![warn(clippy::undocumented_unsafe_blocks)]
 
@@ -155,25 +154,20 @@
 #[cfg(any(debug_assertions, feature = "systick"))]
 macro_rules! cheap_assert {
     ($x:expr) => {
-        if !$x { panic!(); };
-    }
+        if !$x {
+            panic!();
+        };
+    };
 }
 
 pub mod exec;
-#[deprecated(since = "1.3.0", note = "please use the portable-atomic crate")]
-pub mod atomic;
-pub mod util;
-
-#[macro_use]
-#[deprecated(since = "1.2.0", note = "please move to the lilos-list crate")]
-pub mod list;
-
-#[cfg(feature = "systick")]
-pub mod time;
 #[cfg(feature = "mutex")]
 pub mod mutex;
 #[cfg(feature = "spsc")]
 pub mod spsc;
+#[cfg(feature = "systick")]
+pub mod time;
+pub mod util;
 
 #[doc(hidden)]
 pub use portable_atomic;

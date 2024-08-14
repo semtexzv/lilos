@@ -8,7 +8,7 @@
 //! present; it is on by default.
 //!
 //! The OS uses the Cortex-M SysTick Timer to maintain a monotonic counter
-//! recording the number of milliseconds ("ticks") since boot. This module
+//! recording the number of microseconds ("ticks") since boot. This module
 //! provides ways to read that timer, and also to arrange for tasks to be woken
 //! at specific times (such as [`sleep_until`] and [`sleep_for`]).
 //!
@@ -25,15 +25,15 @@
 //!
 //! `TickTime` represents a specific point in time, measured as a number of
 //! ticks since boot (or, really, since the executor was started). It's a
-//! 64-bit count of milliseconds, which means it overflows every 584 million
+//! 64-bit count of microseconds, which means it overflows every 584 thousand
 //! years. This lets us ignore overflows in timestamps, making everything
 //! simpler. `TickTime` is analogous to `std::time::Instant` from the Rust
 //! standard library.
 //!
-//! `Millis` represents a relative time interval in milliseconds. This uses the
+//! `Micros` represents a relative time interval in microseconds. This uses the
 //! same representation as `TickTime`, so adding them together is cheap.
 //!
-//! `core::time::Duration` is similar to `Millis` but with a lot more bells and
+//! `core::time::Duration` is similar to `Micros` but with a lot more bells and
 //! whistles. It's the type used to measure time intervals in the Rust standard
 //! library. It can be used with most time-related API in the OS, but you might
 //! not want to do so on a smaller CPU: `Duration` uses a mixed-number-base
@@ -55,7 +55,7 @@
 //! # Fixing "lost ticks"
 //!
 //! If the longest sequence in your application between any two `await` points
-//! takes less than a millisecond, the standard timer configuration will work
+//! takes less than a microsecond, the standard timer configuration will work
 //! fine and keep reliable time.
 //!
 //! However, if you sometimes need to do more work than that -- or if you're
@@ -66,7 +66,7 @@
 //!
 //! # Getting higher precision
 //!
-//! For many applications, milliseconds are a fine unit of time, but sometimes
+//! For many applications, microsecond are a fine unit of time, but sometimes
 //! you need something more precise. Currently, the easiest way to do this is to
 //! enlist a different hardware timer. The `time` module has no special
 //! privileges that you can't make use of, and adding your own alternate
@@ -84,9 +84,9 @@
 use core::future::Future;
 use core::ops::{Add, AddAssign};
 use core::pin::Pin;
-use portable_atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll};
 use core::time::Duration;
+use portable_atomic::{AtomicU32, Ordering};
 
 use cortex_m::peripheral::{syst::SystClkSource, SYST};
 use cortex_m_rt::exception;
@@ -96,18 +96,24 @@ use pin_project::pin_project;
 static TICK: AtomicU32 = AtomicU32::new(0);
 /// Top 32 bits of the tick counter. Updated by ISR.
 static EPOCH: AtomicU32 = AtomicU32::new(0);
+/// How much to increment the tick counter by.
+static INCR: AtomicU32 = AtomicU32::new(0);
 
-/// Sets up the tick counter for 1kHz operation, assuming a CPU core clock of
+/// Sets up the tick counter for 1kz operation, assuming a CPU core clock of
 /// `clock_hz`.
 ///
 /// If you use this module in your application, call this before
 /// [`run_tasks`][crate::exec::run_tasks] (or a fancier version of `run_tasks`)
 /// to set up the timer for monotonic operation.
 pub fn initialize_sys_tick(syst: &mut SYST, clock_hz: u32) {
-    let cycles_per_millisecond = clock_hz / 1000;
-    syst.set_reload(cycles_per_millisecond - 1);
-    syst.clear_current();
+    let cycles = clock_hz / 1_000;
+    INCR.store(1_000, Ordering::Relaxed);
+
+    syst.disable_counter();
     syst.set_clock_source(SystClkSource::Core);
+
+    syst.set_reload(cycles - 1);
+    syst.clear_current();
     syst.enable_interrupt();
     syst.enable_counter();
 }
@@ -135,7 +141,7 @@ impl TickTime {
 
     /// Constructs a `TickTime` value describing a certain number of
     /// milliseconds since the executor booted.
-    pub fn from_millis_since_boot(m: u64) -> Self {
+    pub fn from_micros_since_boot(m: u64) -> Self {
         Self(m)
     }
 
@@ -146,42 +152,42 @@ impl TickTime {
     ///
     /// If this time is not actually `>= earlier`.
     pub fn duration_since(self, earlier: TickTime) -> Duration {
-        Duration::from_millis(self.millis_since(earlier).0)
+        Duration::from_micros(self.micros_since(earlier).0)
     }
 
     /// Subtracts this time from an earlier time, giving the amount of time
-    /// between them measured in `Millis`.
+    /// between them measured in `Micros`.
     ///
     /// # Panics
     ///
     /// If this time is not actually `>= earlier`.
-    pub fn millis_since(self, earlier: TickTime) -> Millis {
-        Millis(self.0.checked_sub(earlier.0).unwrap())
+    pub fn micros_since(self, earlier: TickTime) -> Micros {
+        Micros(self.0.checked_sub(earlier.0).unwrap())
     }
 
     /// Checks the clock to determine how much time has elapsed since the
     /// instant recorded by `self`.
-    pub fn elapsed(self) -> Millis {
-        Self::now().millis_since(self)
+    pub fn elapsed(self) -> Micros {
+        Self::now().micros_since(self)
     }
 
     /// Checks the clock to determine how much time has elapsed since the
     /// instant recorded by `self`. Convenience version that returns the result
     /// as a `Duration`.
     pub fn elapsed_duration(self) -> Duration {
-        Duration::from_millis(self.elapsed().0)
+        Duration::from_micros(self.elapsed().0)
     }
 
-    /// Adds some milliseconds to `self`, checking for overflow. Note that since
+    /// Adds some microseconds to `self`, checking for overflow. Note that since
     /// we use 64 bit ticks, overflow is unlikely in practice.
-    pub fn checked_add(self, millis: Millis) -> Option<Self> {
-        self.0.checked_add(millis.0).map(TickTime)
+    pub fn checked_add(self, micros: Micros) -> Option<Self> {
+        self.0.checked_add(micros.0).map(TickTime)
     }
 
-    /// Subtracts some milliseconds from `self`, checking for overflow. Overflow
-    /// can occur if `millis` is longer than the time from boot to `self`.
-    pub fn checked_sub(self, millis: Millis) -> Option<Self> {
-        self.0.checked_sub(millis.0).map(TickTime)
+    /// Subtracts some microseconds from `self`, checking for overflow. Overflow
+    /// can occur if `micros` is longer than the time from boot to `self`.
+    pub fn checked_sub(self, micros: Micros) -> Option<Self> {
+        self.0.checked_sub(micros.0).map(TickTime)
     }
 }
 
@@ -190,13 +196,13 @@ impl TickTime {
 impl Add<Duration> for TickTime {
     type Output = Self;
     fn add(self, other: Duration) -> Self::Output {
-        TickTime(self.0 + other.as_millis() as u64)
+        TickTime(self.0 + other.as_micros() as u64)
     }
 }
 
 impl AddAssign<Duration> for TickTime {
     fn add_assign(&mut self, other: Duration) {
-        self.0 += other.as_millis() as u64
+        self.0 += other.as_micros() as u64
     }
 }
 
@@ -206,7 +212,7 @@ impl From<TickTime> for u64 {
     }
 }
 
-/// A period of time measured in milliseconds.
+/// A period of time measured in microseconds.
 ///
 /// This plays a role similar to `core::time::Duration` but is designed to be
 /// cheaper to use. In particular, as of this writing, `Duration` insists on
@@ -216,39 +222,39 @@ impl From<TickTime> for u64 {
 /// multiplication. Many useful processors, such as Cortex-M0, don't have 32-bit
 /// division, much less 64-bit division.
 ///
-/// `Millis` wraps a `u64` and records a number of milliseconds. Since
-/// milliseconds are `lilos`'s unit used for internal timekeeping, this ensures
-/// that a `Millis` can be used for any deadline or timeout computation without
+/// `Micros` wraps a `u64` and records a number of microseconds. Since
+/// microseconds are `lilos`'s unit used for internal timekeeping, this ensures
+/// that a `Micros` can be used for any deadline or timeout computation without
 /// any unit conversions or expensive arithmetic operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Default)]
-pub struct Millis(pub u64);
+pub struct Micros(pub u64);
 
-/// Adds a number of milliseconds to a `TickTime` with normal `+` overflow
+/// Adds a number of microseconds to a `TickTime` with normal `+` overflow
 /// behavior (i.e. checked in debug builds, optionally not checked in release
 /// builds).
-impl Add<Millis> for TickTime {
+impl Add<Micros> for TickTime {
     type Output = Self;
-    fn add(self, other: Millis) -> Self::Output {
+    fn add(self, other: Micros) -> Self::Output {
         TickTime(self.0 + other.0)
     }
 }
 
-/// Adds a number of milliseconds to a `TickTime` with normal `+=` overflow
+/// Adds a number of microseconds to a `TickTime` with normal `+=` overflow
 /// behavior (i.e. checked in debug builds, optionally not checked in release
 /// builds).
-impl AddAssign<Millis> for TickTime {
-    fn add_assign(&mut self, other: Millis) {
+impl AddAssign<Micros> for TickTime {
+    fn add_assign(&mut self, other: Micros) {
         self.0 += other.0;
     }
 }
 
-impl From<Millis> for u64 {
-    fn from(x: Millis) -> Self {
+impl From<Micros> for u64 {
+    fn from(x: Micros) -> Self {
         x.0
     }
 }
 
-impl From<u64> for Millis {
+impl From<u64> for Micros {
     fn from(x: u64) -> Self {
         Self(x)
     }
@@ -298,7 +304,7 @@ pub async fn sleep_until(deadline: TickTime) {
 /// If `d` is 0, this will instantly become `Ready`.
 ///
 /// `d` can be any type that can be added to a `TickTime`, which in practice
-/// means either [`Millis`] or [`Duration`].
+/// means either [`Micros`] or [`Duration`].
 ///
 /// This function is a thin wrapper around [`sleep_until`]. See that function's
 /// docs for examples, details, and alternatives.
@@ -309,7 +315,8 @@ pub async fn sleep_until(deadline: TickTime) {
 ///
 /// Dropping this future does nothing in particular.
 pub fn sleep_for<D>(d: D) -> impl Future<Output = ()>
-    where TickTime: Add<D, Output = TickTime>,
+where
+    TickTime: Add<D, Output = TickTime>,
 {
     sleep_until(TickTime::now() + d)
 }
@@ -333,8 +340,12 @@ pub fn sleep_for<D>(d: D) -> impl Future<Output = ()>
 /// In this case, `await` drops the future as soon as it resolves (as always),
 /// which means the nested `some_operation()` future will be promptly dropped
 /// when we notice that the deadline has been met or exceeded.
-pub fn with_deadline<F>(deadline: TickTime, code: F) -> impl Future<Output = Option<F::Output>>
-    where F: Future,
+pub fn with_deadline<F>(
+    deadline: TickTime,
+    code: F,
+) -> impl Future<Output = Option<F::Output>>
+where
+    F: Future,
 {
     TimeLimited {
         limiter: sleep_until(deadline),
@@ -350,9 +361,13 @@ pub fn with_deadline<F>(deadline: TickTime, code: F) -> impl Future<Output = Opt
 /// as the deadline for the returned future.
 ///
 /// See [`with_deadline`] for more details.
-pub fn with_timeout<D, F>(timeout: D, code: F) -> impl Future<Output = Option<F::Output>>
-    where F: Future,
-          TickTime: Add<D, Output = TickTime>,
+pub fn with_timeout<D, F>(
+    timeout: D,
+    code: F,
+) -> impl Future<Output = Option<F::Output>>
+where
+    F: Future,
+    TickTime: Add<D, Output = TickTime>,
 {
     with_deadline(TickTime::now() + timeout, code)
 }
@@ -373,8 +388,9 @@ struct TimeLimited<A, B> {
 }
 
 impl<A, B> Future for TimeLimited<A, B>
-    where A: Future<Output = ()>,
-          B: Future,
+where
+    A: Future<Output = ()>,
+    B: Future,
 {
     type Output = Option<B::Output>;
 
@@ -397,7 +413,7 @@ impl<A, B> Future for TimeLimited<A, B>
 /// milliseconds, you would write:
 ///
 /// ```ignore
-/// let mut gate = PeriodicGate::from(Millis(30));
+/// let mut gate = PeriodicGate::from(Micros(30_000));
 /// loop {
 ///     f();
 ///     gate.next_time().await;
@@ -424,23 +440,23 @@ impl<A, B> Future for TimeLimited<A, B>
 ///   different from `PeriodicGate`'s behavior.
 #[derive(Debug)]
 pub struct PeriodicGate {
-    interval: Millis,
+    interval: Micros,
     next: TickTime,
 }
 
 impl From<Duration> for PeriodicGate {
     fn from(d: Duration) -> Self {
         PeriodicGate {
-            interval: Millis(d.as_millis() as u64),
+            interval: Micros(d.as_micros() as u64),
             next: TickTime::now(),
         }
     }
 }
 
-impl From<Millis> for PeriodicGate {
+impl From<Micros> for PeriodicGate {
     /// Creates a periodic gate that can be used to release execution every
     /// `interval`, starting right now.
-    fn from(interval: Millis) -> Self {
+    fn from(interval: Micros) -> Self {
         PeriodicGate {
             interval,
             next: TickTime::now(),
@@ -454,7 +470,7 @@ impl PeriodicGate {
     ///
     /// This can be useful for creating multiple periodic gates that operate out
     /// of phase with respect to each other.
-    pub fn new_shift(interval: Millis, delay: Millis) -> Self {
+    pub fn new_shift(interval: Micros, delay: Micros) -> Self {
         PeriodicGate {
             interval,
             next: TickTime::now() + delay,
@@ -480,12 +496,34 @@ impl PeriodicGate {
     }
 }
 
+/// [embedded_hal_async::delay::DelayNs] implementation using our SysTick timer
+#[derive(Debug)]
+pub struct Delay;
+
+impl embedded_hal_async::delay::DelayNs for Delay {
+    async fn delay_ns(&mut self, mut ns: u32) {
+        while ns > 1_000_000 {
+            sleep_for(Micros(1)).await;
+            ns -= 1_000_000;
+        }
+    }
+
+    async fn delay_us(&mut self, mut us: u32) {
+        sleep_for(Micros(us as u64)).await;
+    }
+
+    async fn delay_ms(&mut self, ms: u32) {
+        sleep_for(Micros(ms as u64 * 1000)).await
+    }
+}
+
 /// System tick ISR. Advances the tick counter. This doesn't wake any tasks; see
 /// code in `exec` for that.
 #[doc(hidden)]
 #[exception]
 fn SysTick() {
-    if TICK.fetch_add(1, Ordering::Release) == u32::MAX {
+    let incr = INCR.load(Ordering::Acquire);
+    if TICK.fetch_add(incr, Ordering::Release) < incr {
         EPOCH.fetch_add(1, Ordering::Release);
     }
 }

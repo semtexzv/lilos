@@ -17,8 +17,9 @@ default-target = "thumbv6m-none-eabi"
 cortex-m.workspace = true
 cortex-m-rt.workspace = true
 lilos = { workspace = true, features = ["systick"] }
+lilos-rp.workspace = true
+lilos-hal.workspace = true
 panic-halt.workspace = true
-rp2040-pac.workspace = true
 rp2040-boot2.workspace = true
 
 [[bin]]

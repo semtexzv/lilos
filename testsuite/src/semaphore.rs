@@ -4,7 +4,7 @@
 
 use core::pin::pin;
 
-use lilos_semaphore::{Semaphore, ScopedSemaphore};
+use lilos_semaphore::{ScopedSemaphore, Semaphore};
 
 pub async fn test_create_drop() {
     let _a_semaphore = pin!(Semaphore::new(10));
@@ -73,8 +73,10 @@ pub async fn test_fairness() {
     // Nor the third.
     assert!(futures::poll!(third_acq.as_mut()).is_pending());
     // But the first should.
-    assert!(futures::poll!(first_acq.as_mut()).is_ready(),
-        "first taker should have completed now");
+    assert!(
+        futures::poll!(first_acq.as_mut()).is_ready(),
+        "first taker should have completed now"
+    );
 
     // This should cause no changes to the others.
     assert!(futures::poll!(second_acq.as_mut()).is_pending());
@@ -83,13 +85,17 @@ pub async fn test_fairness() {
     // Alright, now let's unwind the other two.
     a_semaphore.release();
     assert!(futures::poll!(third_acq.as_mut()).is_pending());
-    assert!(futures::poll!(second_acq.as_mut()).is_ready(),
-        "second taker should have completed now");
+    assert!(
+        futures::poll!(second_acq.as_mut()).is_ready(),
+        "second taker should have completed now"
+    );
 
     assert!(futures::poll!(third_acq.as_mut()).is_pending());
     a_semaphore.release();
-    assert!(futures::poll!(third_acq.as_mut()).is_ready(),
-        "third taker should have completed now");
+    assert!(
+        futures::poll!(third_acq.as_mut()).is_ready(),
+        "third taker should have completed now"
+    );
 }
 
 pub async fn test_cancellation() {

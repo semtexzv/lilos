@@ -7,7 +7,7 @@
 //!
 //! This defaults to using USART3, which is conveniently wired to the "virtual
 //! COM port" exposed over USB by the built-in STLink V3 programmer. Bytes
-//! received at 115200 baud will be retransmitted at the same rate. 
+//! received at 115200 baud will be retransmitted at the same rate.
 //!
 //! Wiring:
 //! - PD8 is USART3 TX
@@ -56,15 +56,19 @@
 extern crate panic_halt;
 
 use core::convert::Infallible;
+use core::future::Future;
 use core::mem::MaybeUninit;
 use core::pin::pin;
-use core::future::Future;
 
-use stm32_metapac::{self as device, interrupt, gpio::vals::{Moder, Ot}};
+use stm32_metapac::{
+    self as device,
+    gpio::vals::{Moder, Ot},
+    interrupt,
+};
 
 use lilos::exec::Notify;
 use lilos::spsc;
-use lilos::time::{Millis, PeriodicGate};
+use lilos::time::{Micros, PeriodicGate};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Entry point
@@ -116,7 +120,7 @@ fn heartbeat(
     // and don't need to retain access to it. This distinction is hard (or
     // impossible?) to express with an `async fn`.
 
-    const PERIOD: Millis = Millis(500);
+    const PERIOD: Micros = Micros(500);
 
     // Turn on our GPIO port.
     rcc.ahb4enr().modify(|w| w.set_gpioben(true));
@@ -220,7 +224,9 @@ fn usart_echo(
         // futures, giving type (!, !), which Rust doesn't think is uninhabited --
         // by extracting either one of the !s we prove that code past this point is
         // unreachable.
-        futures::future::join(echo_rx(usart, q_push), echo_tx(usart, q_pop)).await.0
+        futures::future::join(echo_rx(usart, q_push), echo_tx(usart, q_pop))
+            .await
+            .0
     }
 }
 
@@ -238,7 +244,7 @@ async fn echo_rx(
 async fn echo_tx(
     usart: device::usart::Usart,
     mut q: spsc::Popper<'_, u8>,
-) -> Infallible  {
+) -> Infallible {
     loop {
         send(usart, q.pop().await).await;
     }

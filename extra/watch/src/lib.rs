@@ -90,7 +90,6 @@
 //! wake tasks that are awaiting [`Receiver::changed`].
 
 #![no_std]
-
 #![forbid(unsafe_code)]
 #![warn(
     elided_lifetimes_in_paths,
@@ -103,7 +102,7 @@
     trivial_numeric_casts,
     unreachable_pub,
     unsafe_op_in_unsafe_fn,
-    unused_qualifications,
+    unused_qualifications
 )]
 
 use core::cell::{Cell, RefCell};
@@ -133,9 +132,7 @@ impl<T> Watch<T> {
 
     /// Creates a new send-only handle to the watched data.
     pub fn sender(&self) -> Sender<'_, T> {
-        Sender {
-            shared: self,
-        }
+        Sender { shared: self }
     }
 
     /// Creates a new receive-only handle to the watched data.
@@ -263,14 +260,17 @@ impl<T> Receiver<'_, T> {
     /// has or has not seen won't change.
     pub async fn changed(&mut self) {
         let w = self.shared;
-        let v = w.update.until(|| {
-            let v = w.version.get();
-            if v != self.version {
-                Some(v)
-            } else {
-                None
-            }
-        }).await;
+        let v = w
+            .update
+            .until(|| {
+                let v = w.version.get();
+                if v != self.version {
+                    Some(v)
+                } else {
+                    None
+                }
+            })
+            .await;
         self.version = v;
     }
 
@@ -341,7 +341,8 @@ impl<T> Receiver<'_, T> {
     /// [`copy_current_and_update`][Self::copy_current_and_update].
     #[inline(always)]
     pub fn copy_current(&self) -> T
-        where T: Copy
+    where
+        T: Copy,
     {
         self.glimpse(|value| *value)
     }
@@ -391,7 +392,8 @@ impl<T> Receiver<'_, T> {
     /// To copy the contents _without_ marking them as seen, see
     /// [`copy_current`][Self::copy_current].
     pub fn copy_current_and_update(&mut self) -> T
-        where T: Copy
+    where
+        T: Copy,
     {
         self.glimpse_and_update(|value| *value)
     }

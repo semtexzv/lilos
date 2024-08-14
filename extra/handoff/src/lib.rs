@@ -70,7 +70,6 @@
 //! with the compiler, though, so again -- be careful.
 
 #![no_std]
-
 #![warn(
     elided_lifetimes_in_paths,
     explicit_outlives_requirements,
@@ -82,7 +81,7 @@
     trivial_numeric_casts,
     unreachable_pub,
     unsafe_op_in_unsafe_fn,
-    unused_qualifications,
+    unused_qualifications
 )]
 
 use core::cell::Cell;
@@ -173,7 +172,7 @@ impl<T> core::fmt::Debug for State<T> {
 impl<T> Copy for State<T> {}
 impl<T> Clone for State<T> {
     fn clone(&self) -> Self {
-        *self  // thanks, Copy impl!
+        *self // thanks, Copy impl!
     }
 }
 
@@ -198,7 +197,7 @@ impl<T> Pusher<'_, T> {
                 self.0.state.set(State::Idle);
                 self.0.ping.notify();
                 Ok(())
-            },
+            }
             #[cfg(debug_assertions)]
             State::PushWait(_) => panic!(),
             _ => Err(value),
@@ -245,9 +244,9 @@ impl<T> Pusher<'_, T> {
                 match self.0.state.get() {
                     State::Idle => {
                         // Our peer is not waiting, we must block.
-                        self.0.state.set(State::PushWait(
-                            NonNull::from(&mut *guard)
-                        ));
+                        self.0
+                            .state
+                            .set(State::PushWait(NonNull::from(&mut *guard)));
                         self.0.ping.until_next().await;
                         continue;
                     }
@@ -260,17 +259,22 @@ impl<T> Pusher<'_, T> {
                         // Our peer is waiting. We can do the handoff
                         // immediately. Defuse the guard.
                         unsafe {
-                            dest_ptr.as_ptr().write(ScopeGuard::into_inner(guard));
+                            dest_ptr
+                                .as_ptr()
+                                .write(ScopeGuard::into_inner(guard));
                         }
                         self.0.state.set(State::Idle);
                         self.0.ping.notify();
                         return;
-                    },
+                    }
                 }
             } else {
                 // Value must have been taken while we were sleeping.
                 // Pop side should have left state in either of....
-                debug_assert!(matches!(self.0.state.get(), State::Idle | State::PopWait(_)));
+                debug_assert!(matches!(
+                    self.0.state.get(),
+                    State::Idle | State::PopWait(_)
+                ));
                 break;
             }
         }
@@ -308,7 +312,7 @@ impl<T> Popper<'_, T> {
                 self.0.state.set(State::Idle);
                 self.0.ping.notify();
                 value
-            },
+            }
             #[cfg(debug_assertions)]
             State::PopWait(_) => panic!(),
             _ => None,
@@ -349,7 +353,10 @@ impl<T> Popper<'_, T> {
                 // Value must have been deposited while we slept. The push side
                 // should either have left the state idle, or began blocking for
                 // our next item:
-                debug_assert!(matches!(self.0.state.get(), State::Idle | State::PushWait(_)));
+                debug_assert!(matches!(
+                    self.0.state.get(),
+                    State::Idle | State::PushWait(_)
+                ));
 
                 return ScopeGuard::into_inner(guard).unwrap();
             } else {
@@ -357,9 +364,9 @@ impl<T> Popper<'_, T> {
                 match self.0.state.get() {
                     State::Idle => {
                         // Our peer is not waiting, we must block.
-                        self.0.state.set(State::PopWait(
-                            NonNull::from(&mut *guard)
-                        ));
+                        self.0
+                            .state
+                            .set(State::PopWait(NonNull::from(&mut *guard)));
                         self.0.ping.until_next().await;
                         continue;
                     }
@@ -367,7 +374,7 @@ impl<T> Popper<'_, T> {
                         // We are still blocked; spurious wakeup.
                         self.0.ping.until_next().await;
                         continue;
-                    },
+                    }
                     State::PushWait(src_ptr) => {
                         // Our peer is waiting. We can do the handoff
                         // immediately.
@@ -378,7 +385,7 @@ impl<T> Popper<'_, T> {
                         self.0.state.set(State::Idle);
                         self.0.ping.notify();
                         return ScopeGuard::into_inner(guard).unwrap();
-                    },
+                    }
                 }
             }
         }

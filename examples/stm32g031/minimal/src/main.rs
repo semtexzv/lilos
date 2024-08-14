@@ -27,7 +27,7 @@ extern crate panic_halt;
 use stm32_metapac::{self as device, gpio::vals::Moder};
 
 // How often our blinky task wakes up (1/2 our blink frequency).
-const PERIOD: lilos::time::Millis = lilos::time::Millis(500);
+const PERIOD: lilos::time::Micros = lilos::time::Micros(500);
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -36,7 +36,9 @@ fn main() -> ! {
 
     // Configure our output pin, D12.
     device::RCC.gpioenr().modify(|w| w.set_gpiocen(true));
-    device::GPIOC.moder().modify(|w| w.set_moder(6, Moder::OUTPUT));
+    device::GPIOC
+        .moder()
+        .modify(|w| w.set_moder(6, Moder::OUTPUT));
 
     // Create a task to blink the LED. You could also write this as an `async
     // fn` but we've inlined it as an `async` block for simplicity.
@@ -58,7 +60,7 @@ fn main() -> ! {
     lilos::time::initialize_sys_tick(&mut cp.SYST, 16_000_000);
     // Set up and run the scheduler with a single task.
     lilos::exec::run_tasks(
-        &mut [blink],  // <-- array of tasks
-        lilos::exec::ALL_TASKS,  // <-- which to start initially
+        &mut [blink],           // <-- array of tasks
+        lilos::exec::ALL_TASKS, // <-- which to start initially
     )
 }

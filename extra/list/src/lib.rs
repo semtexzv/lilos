@@ -205,9 +205,12 @@ impl<T> List<T> {
 
         if node_ptr == root.tail {
             // This node is the _only_ node in the list.
-            debug_assert_eq!(node.next.get(), None,
+            debug_assert_eq!(
+                node.next.get(),
+                None,
                 "list thinks node @{node_ptr:?} is tail, \
-                 node thinks it has a next");
+                 node thinks it has a next"
+            );
             self.root.set(None);
         } else {
             // Unlink this node from its neighbor.

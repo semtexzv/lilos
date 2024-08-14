@@ -15,10 +15,12 @@ pub async fn test_create_drop() {
 pub async fn test_uncontended_try_lock_shared() {
     let a_lock = pin!(RwLock::new(0u32));
     let a_lock = a_lock.into_ref();
-    let guard1 = a_lock.try_lock_shared()
+    let guard1 = a_lock
+        .try_lock_shared()
         .expect("uncontended lock should succeed");
     assert!(a_lock.try_lock_exclusive().is_err());
-    let guard2 = a_lock.try_lock_shared()
+    let guard2 = a_lock
+        .try_lock_shared()
         .expect("second reader lock should succeed");
 
     assert_eq!(*guard1, *guard2);
@@ -31,7 +33,8 @@ pub async fn test_uncontended_try_lock_shared() {
 pub async fn test_uncontended_try_lock_exclusive() {
     let a_lock = pin!(RwLock::new(0u32));
     let a_lock = a_lock.into_ref();
-    let guard1 = a_lock.try_lock_exclusive()
+    let guard1 = a_lock
+        .try_lock_exclusive()
         .expect("uncontended lock-exclusive should succeed");
 
     assert!(a_lock.try_lock_exclusive().is_err());
@@ -39,7 +42,8 @@ pub async fn test_uncontended_try_lock_exclusive() {
 
     guard1.perform(|value| *value += 1);
 
-    a_lock.try_lock_exclusive()
+    a_lock
+        .try_lock_exclusive()
         .expect("lock should now be free")
         .perform(|value| assert_eq!(*value, 1));
 }

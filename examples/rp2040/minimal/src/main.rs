@@ -24,6 +24,8 @@
 // because it isn't otherwise referenced in code!
 extern crate panic_halt;
 
+use lilos_rp::gpio::Level;
+
 // For RP2040, we need to include a bootloader. The general Cargo build process
 // doesn't have great support for this, so we included it as a binary constant.
 #[link_section = ".boot_loader"]
@@ -31,23 +33,15 @@ extern crate panic_halt;
 static BOOT: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 // How often our blinky task wakes up (1/2 our blink frequency).
-const PERIOD: lilos::time::Millis = lilos::time::Millis(500);
+const PERIOD: lilos::time::Micros = lilos::time::Micros(500);
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     // Check out peripherals from the runtime.
     let mut cp = cortex_m::Peripherals::take().unwrap();
-    let p = rp2040_pac::Peripherals::take().unwrap();
+    let p = lilos_rp::Peripherals::take();
 
-    // Configure our output pin, GPIO 25. Begin by bringing IO BANK0 out of
-    // reset.
-    p.RESETS.reset.modify(|_, w| w.io_bank0().clear_bit());
-    while !p.RESETS.reset_done.read().io_bank0().bit() {}
-
-    // Set GPIO25 to be controlled by SIO.
-    p.IO_BANK0.gpio[25].gpio_ctrl.write(|w| w.funcsel().sio());
-    // Now have SIO configure GPIO25 as an output.
-    p.SIO.gpio_oe_set.write(|w| unsafe { w.bits(1 << 25) });
+    let mut output = lilos_rp::gpio::Output::new(p.PIN_25, Level::High);
 
     // Create a task to blink the LED. You could also write this as an `async
     // fn` but we've inlined it as an `async` block for simplicity.
@@ -59,7 +53,7 @@ fn main() -> ! {
         // Loop forever, blinking things. Note that this borrows the device
         // peripherals `p` from the enclosing stack frame.
         loop {
-            p.SIO.gpio_out_xor.write(|w| unsafe { w.bits(1 << 25) });
+            output.set_level(!output.get_output_level());
             gate.next_time().await;
         }
     });
@@ -69,7 +63,7 @@ fn main() -> ! {
     lilos::time::initialize_sys_tick(&mut cp.SYST, 6_000_000);
     // Set up and run the scheduler with a single task.
     lilos::exec::run_tasks(
-        &mut [blink],  // <-- array of tasks
-        lilos::exec::ALL_TASKS,  // <-- which to start initially
+        &mut [blink],           // <-- array of tasks
+        lilos::exec::ALL_TASKS, // <-- which to start initially
     )
 }

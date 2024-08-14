@@ -76,9 +76,11 @@ fn main() -> ! {
 /// Each call to `blinky` produces a `Future` that captures its parameters. The
 /// `Future` loops forever, as indicated by its "never resolves" return type,
 /// `!`.
-async fn blinky(pin_mask: u16, interval: Duration, gpiod: device::gpio::Gpio)
-    -> Infallible
-{
+async fn blinky(
+    pin_mask: u16,
+    interval: Duration,
+    gpiod: device::gpio::Gpio,
+) -> Infallible {
     // Zero-extend the mask to fit the BSRR register.
     let pin_mask = u32::from(pin_mask);
 

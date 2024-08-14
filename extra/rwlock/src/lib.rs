@@ -43,8 +43,8 @@
 use core::cell::{Cell, UnsafeCell};
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
-use lilos_list::{List, Meta};
 use lilos::util::CancelSafe;
+use lilos_list::{List, Meta};
 use pin_project::pin_project;
 use scopeguard::ScopeGuard;
 
@@ -398,7 +398,9 @@ impl LockImpl {
 
             // Wake a _single_ exclusive lock attempt if one exists at the head
             // of the queue.
-            if p.waiters.wake_head_if(|Meta(access)| access == &Access::Exclusive) {
+            if p.waiters
+                .wake_head_if(|Meta(access)| access == &Access::Exclusive)
+            {
                 // Record it, to keep it from getting scooped.
                 self.readers.set(-1);
             } else {

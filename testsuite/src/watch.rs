@@ -6,7 +6,7 @@ use crate::{poll_and_assert_not_ready, poll_and_assert_ready};
 
 pub async fn test_receive_only() {
     let w = Watch::new(123_u32);
-    
+
     let mut receiver = w.subscribe();
 
     receiver.glimpse(|&value| assert_eq!(value, 123_u32));
@@ -27,7 +27,7 @@ pub async fn test_receive_only() {
 
 pub async fn test_send_receive() {
     let w = Watch::new(123_u32);
-    
+
     let sender = w.sender();
     let mut receiver = w.subscribe();
 

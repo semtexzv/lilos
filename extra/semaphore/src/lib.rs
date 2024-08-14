@@ -25,9 +25,9 @@
 )]
 
 use core::pin::Pin;
-use portable_atomic::{AtomicUsize, Ordering};
 use lilos_list::List;
 use pin_project::pin_project;
+use portable_atomic::{AtomicUsize, Ordering};
 
 /// A [counting semaphore].
 ///

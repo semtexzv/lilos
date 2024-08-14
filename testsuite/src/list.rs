@@ -6,8 +6,8 @@
 
 #![allow(clippy::bool_assert_comparison)]
 
-use core::pin::{Pin, pin};
 use core::cell::Cell;
+use core::pin::{pin, Pin};
 
 use lilos_list::List;
 
@@ -18,8 +18,11 @@ pub async fn test_list_basics() {
 
     // Make sure these don't, like, assert on an empty list or anything
     list.as_ref().wake_while(|_| true);
-    assert_eq!(list.as_ref().wake_head_if(|_| true), false,
-        "wake_one on an empty list must return false");
+    assert_eq!(
+        list.as_ref().wake_head_if(|_| true),
+        false,
+        "wake_one on an empty list must return false"
+    );
 
     // And, detached list drop.
 }
@@ -41,7 +44,6 @@ pub async fn test_insert_and_wait_wake_one() {
     let list = pin!(List::new());
     // Drop list mutability. TODO: should create_list even return a Pin<&mut>?
     let list = list.into_ref();
-
 
     // Check that we can insert a node, A:
     let mut fut_a = pin!(list.join(()));
@@ -116,10 +118,7 @@ pub async fn test_iawwc_no_fire_if_never_polled() {
 
     let cleanup_called = Cell::new(false);
 
-    let fut = list.join_with_cleanup(
-        (),
-        || cleanup_called.set(true),
-    );
+    let fut = list.join_with_cleanup((), || cleanup_called.set(true));
     assert!(!cleanup_called.get());
     drop(fut);
     // Should not be called if the node was detached at drop.
@@ -134,10 +133,8 @@ pub async fn test_iawwc_no_fire_if_polled_after_detach() {
     let cleanup_called = Cell::new(false);
 
     {
-        let mut fut = pin!(list.join_with_cleanup(
-            (),
-            || cleanup_called.set(true),
-        ));
+        let mut fut =
+            pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
         assert!(!cleanup_called.get());
         // Poll so that the node attaches itself.
         let _ = futures::poll!(fut.as_mut());
@@ -167,10 +164,8 @@ pub async fn test_iawwc_fire() {
     // Once the node has been pinned it becomes hard to drop explicitly, but we
     // can do it with a scope:
     {
-        let mut fut = pin!(list.join_with_cleanup(
-                (),
-                || cleanup_called.set(true),
-                ));
+        let mut fut =
+            pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
         // Poll the insert future to cause the node to link up.
         let _ = futures::poll!(fut.as_mut());
         assert_eq!(cleanup_called.get(), false); // not yet

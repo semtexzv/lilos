@@ -24,10 +24,12 @@ systick = []
 
 [dependencies]
 cfg-if.workspace = true
-cortex-m = {workspace = true, features = ["critical-section-single-core"]}
+cortex-m.workspace = true
 cortex-m-rt.workspace = true
 lilos-list.workspace = true
 pin-project.workspace = true
+
+embedded-hal-async.workspace = true
 
 [dependencies.portable-atomic]
 version = "1.6.0"

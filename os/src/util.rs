@@ -8,8 +8,12 @@
 //! applications. Unlike `atomic`, it's not particularly focused on a single
 //! topic.
 
-use core::{future::Future, pin::Pin, task::{Context, Poll}};
 use core::marker::PhantomData;
+use core::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use pin_project::{pin_project, pinned_drop};
 
@@ -56,8 +60,9 @@ pub trait FutureExt {
     /// Wraps this future such that `action` will be called if it is dropped
     /// before it resolves.
     fn on_cancel<A>(self, action: A) -> OnCancel<Self, A>
-        where A: FnOnce(),
-              Self: Sized,
+    where
+        A: FnOnce(),
+        Self: Sized,
     {
         OnCancel {
             inner: self,
@@ -73,7 +78,8 @@ impl<F: Future> FutureExt for F {}
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 pub struct OnCancel<F, A>
-    where A: FnOnce(),
+where
+    A: FnOnce(),
 {
     #[pin]
     inner: F,
@@ -82,7 +88,8 @@ pub struct OnCancel<F, A>
 
 #[pinned_drop]
 impl<F, A> PinnedDrop for OnCancel<F, A>
-    where A: FnOnce(),
+where
+    A: FnOnce(),
 {
     fn drop(self: Pin<&mut Self>) {
         if let Some(a) = self.project().action.take() {
@@ -92,8 +99,9 @@ impl<F, A> PinnedDrop for OnCancel<F, A>
 }
 
 impl<F, A> Future for OnCancel<F, A>
-    where F: Future,
-          A: FnOnce() + Unpin,
+where
+    F: Future,
+    A: FnOnce() + Unpin,
 {
     type Output = F::Output;
 
