@@ -34,19 +34,18 @@ use lilos_rp::gpio::Level;
 static BOOT: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 // How often our blinky task wakes up (1/2 our blink frequency).
-const PERIOD: lilos::time::Micros = lilos::time::Micros(500);
+const PERIOD: lilos::time::Micros = lilos::time::Micros(500_000);
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     // Check out peripherals from the runtime.
-    let mut cp = cortex_m::Peripherals::take().unwrap();
     let p = lilos_rp::Peripherals::take();
 
     let mut output = lilos_rp::gpio::Output::new(p.PIN_25, Level::High);
 
     // Create a task to blink the LED. You could also write this as an `async
     // fn` but we've inlined it as an `async` block for simplicity.
-    let blink = core::pin::pin!(async {
+    let blink = core::pin::pin!(async move {
         // PeriodicGate is a `lilos` tool for implementing low-jitter periodic
         // actions. It opens once per PERIOD.
         let mut gate = lilos::time::PeriodicGate::from(PERIOD);
@@ -61,11 +60,12 @@ fn main() -> ! {
 
     // Configure the systick timer for 1kHz ticks at the default ROSC speed of
     // _roughly_ 6 MHz.
-    let systick = SysTick::new(&mut cp.SYST, 6_000_000);
+    let systick = SysTick::initialize( 6_000_000);
     // Set up and run the scheduler with a single task.
-    lilos::exec::run_tasks(
-        &mut [blink],           // <-- array of tasks
+    lilos::exec::schedule(
+        &mut [blink], // <-- array of tasks
         &[&systick],
-        lilos::exec::ALL_TASKS, // <-- which to start initially
+        lilos::exec::ALL_TASKS,
+        // <-- which to start initially
     )
 }

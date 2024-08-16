@@ -15,13 +15,9 @@ pub async fn test_create_drop() {
 pub async fn test_uncontended_try_lock_shared() {
     let a_lock = pin!(RwLock::new(0u32));
     let a_lock = a_lock.into_ref();
-    let guard1 = a_lock
-        .try_lock_shared()
-        .expect("uncontended lock should succeed");
+    let guard1 = a_lock.try_lock_shared().expect("uncontended lock should succeed");
     assert!(a_lock.try_lock_exclusive().is_err());
-    let guard2 = a_lock
-        .try_lock_shared()
-        .expect("second reader lock should succeed");
+    let guard2 = a_lock.try_lock_shared().expect("second reader lock should succeed");
 
     assert_eq!(*guard1, *guard2);
     drop(guard1);

@@ -85,24 +85,15 @@ fn main() -> ! {
 
     // Create and pin tasks.
     let heartbeat = pin!(heartbeat(device::RCC, device::GPIOB));
-    let echo = pin!(usart_echo(
-        device::RCC,
-        device::GPIOD,
-        device::USART3,
-        CLOCK_HZ,
-    ));
+    let echo = pin!(usart_echo(device::RCC, device::GPIOD, device::USART3, CLOCK_HZ,));
 
     // Set up and run the scheduler.
     lilos::time::initialize_sys_tick(&mut cp.SYST, CLOCK_HZ);
-    lilos::exec::run_tasks_with_idle(
-        &mut [heartbeat, echo],
-        lilos::exec::ALL_TASKS,
-        || {
-            device::GPIOD.bsrr().write(|w| w.set_br(15, true));
-            cortex_m::asm::wfi();
-            device::GPIOD.bsrr().write(|w| w.set_bs(15, true));
-        },
-    )
+    lilos::exec::run_tasks_with_idle(&mut [heartbeat, echo], lilos::exec::ALL_TASKS, || {
+        device::GPIOD.bsrr().write(|w| w.set_br(15, true));
+        cortex_m::asm::wfi();
+        device::GPIOD.bsrr().write(|w| w.set_bs(15, true));
+    })
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -110,10 +101,7 @@ fn main() -> ! {
 
 /// Pulses a GPIO pin connected to an LED, to show that the scheduler is still
 /// running, etc.
-fn heartbeat(
-    rcc: device::rcc::Rcc,
-    gpiob: device::gpio::Gpio,
-) -> impl Future<Output = Infallible> {
+fn heartbeat(rcc: device::rcc::Rcc, gpiob: device::gpio::Gpio) -> impl Future<Output = Infallible> {
     // This is implemented using an explicit `async` block, instead of as an
     // `async fn`, to make it clear which actions occur during setup, and which
     // are ongoing. In particular, we only need to borrow the RCC for *setup*
@@ -231,20 +219,14 @@ fn usart_echo(
 }
 
 /// Echo receive task. Moves bytes from `usart` to `q`.
-async fn echo_rx(
-    usart: device::usart::Usart,
-    mut q: spsc::Pusher<'_, u8>,
-) -> Infallible {
+async fn echo_rx(usart: device::usart::Usart, mut q: spsc::Pusher<'_, u8>) -> Infallible {
     loop {
         q.reserve().await.push(recv(usart).await);
     }
 }
 
 /// Echo transmit task. Moves bytes from `q` to `usart`.
-async fn echo_tx(
-    usart: device::usart::Usart,
-    mut q: spsc::Popper<'_, u8>,
-) -> Infallible {
+async fn echo_tx(usart: device::usart::Usart, mut q: spsc::Popper<'_, u8>) -> Infallible {
     loop {
         send(usart, q.pop().await).await;
     }

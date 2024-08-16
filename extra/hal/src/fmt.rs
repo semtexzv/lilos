@@ -268,4 +268,3 @@ impl<'a> defmt::Format for Bytes<'a> {
         defmt::write!(fmt, "{:02x}", self.0)
     }
 }
-

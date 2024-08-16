@@ -244,9 +244,7 @@ impl<T> Pusher<'_, T> {
                 match self.0.state.get() {
                     State::Idle => {
                         // Our peer is not waiting, we must block.
-                        self.0
-                            .state
-                            .set(State::PushWait(NonNull::from(&mut *guard)));
+                        self.0.state.set(State::PushWait(NonNull::from(&mut *guard)));
                         self.0.ping.until_next().await;
                         continue;
                     }
@@ -259,9 +257,7 @@ impl<T> Pusher<'_, T> {
                         // Our peer is waiting. We can do the handoff
                         // immediately. Defuse the guard.
                         unsafe {
-                            dest_ptr
-                                .as_ptr()
-                                .write(ScopeGuard::into_inner(guard));
+                            dest_ptr.as_ptr().write(ScopeGuard::into_inner(guard));
                         }
                         self.0.state.set(State::Idle);
                         self.0.ping.notify();
@@ -271,10 +267,7 @@ impl<T> Pusher<'_, T> {
             } else {
                 // Value must have been taken while we were sleeping.
                 // Pop side should have left state in either of....
-                debug_assert!(matches!(
-                    self.0.state.get(),
-                    State::Idle | State::PopWait(_)
-                ));
+                debug_assert!(matches!(self.0.state.get(), State::Idle | State::PopWait(_)));
                 break;
             }
         }
@@ -353,10 +346,7 @@ impl<T> Popper<'_, T> {
                 // Value must have been deposited while we slept. The push side
                 // should either have left the state idle, or began blocking for
                 // our next item:
-                debug_assert!(matches!(
-                    self.0.state.get(),
-                    State::Idle | State::PushWait(_)
-                ));
+                debug_assert!(matches!(self.0.state.get(), State::Idle | State::PushWait(_)));
 
                 return ScopeGuard::into_inner(guard).unwrap();
             } else {
@@ -364,9 +354,7 @@ impl<T> Popper<'_, T> {
                 match self.0.state.get() {
                     State::Idle => {
                         // Our peer is not waiting, we must block.
-                        self.0
-                            .state
-                            .set(State::PopWait(NonNull::from(&mut *guard)));
+                        self.0.state.set(State::PopWait(NonNull::from(&mut *guard)));
                         self.0.ping.until_next().await;
                         continue;
                     }
@@ -378,10 +366,7 @@ impl<T> Popper<'_, T> {
                     State::PushWait(src_ptr) => {
                         // Our peer is waiting. We can do the handoff
                         // immediately.
-                        core::mem::swap(
-                            unsafe { &mut *src_ptr.as_ptr() },
-                            &mut *guard,
-                        );
+                        core::mem::swap(unsafe { &mut *src_ptr.as_ptr() }, &mut *guard);
                         self.0.state.set(State::Idle);
                         self.0.ping.notify();
                         return ScopeGuard::into_inner(guard).unwrap();

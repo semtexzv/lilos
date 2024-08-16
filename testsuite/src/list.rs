@@ -133,8 +133,7 @@ pub async fn test_iawwc_no_fire_if_polled_after_detach() {
     let cleanup_called = Cell::new(false);
 
     {
-        let mut fut =
-            pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
+        let mut fut = pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
         assert!(!cleanup_called.get());
         // Poll so that the node attaches itself.
         let _ = futures::poll!(fut.as_mut());
@@ -164,8 +163,7 @@ pub async fn test_iawwc_fire() {
     // Once the node has been pinned it becomes hard to drop explicitly, but we
     // can do it with a scope:
     {
-        let mut fut =
-            pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
+        let mut fut = pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
         // Poll the insert future to cause the node to link up.
         let _ = futures::poll!(fut.as_mut());
         assert_eq!(cleanup_called.get(), false); // not yet

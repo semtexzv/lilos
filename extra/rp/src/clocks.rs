@@ -15,7 +15,6 @@ use crate::gpio::{AnyPin, SealedPin};
 use crate::pac::common::{Reg, RW};
 use crate::{pac, reset, Peripheral};
 
-
 pub const ROSC_FREQ: u32 = 140_000_000;
 
 // NOTE: all gpin handling is commented out for future reference.
@@ -272,6 +271,7 @@ pub struct RefClkConfig {
 }
 
 /// Reference clock source.
+#[repr(u8)]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefClkSrc {
@@ -286,6 +286,7 @@ pub enum RefClkSrc {
 }
 
 /// SYS clock source.
+#[repr(u8)]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SysClkSrc {
@@ -529,9 +530,8 @@ pub unsafe fn init(config: ClockConfig) {
             SysClkSrc::PllSys => (Src::CLKSRC_CLK_SYS_AUX, Aux::CLKSRC_PLL_SYS, pll_sys_freq),
             SysClkSrc::PllUsb => (Src::CLKSRC_CLK_SYS_AUX, Aux::CLKSRC_PLL_USB, pll_usb_freq),
             SysClkSrc::Rosc => (Src::CLKSRC_CLK_SYS_AUX, Aux::ROSC_CLKSRC, rosc_freq),
-            SysClkSrc::Xosc => (Src::CLKSRC_CLK_SYS_AUX, Aux::XOSC_CLKSRC, xosc_freq),
-            // SysClkSrc::Gpin0 => (Src::CLKSRC_CLK_SYS_AUX, Aux::CLKSRC_GPIN0, gpin0_freq),
-            // SysClkSrc::Gpin1 => (Src::CLKSRC_CLK_SYS_AUX, Aux::CLKSRC_GPIN1, gpin1_freq),
+            SysClkSrc::Xosc => (Src::CLKSRC_CLK_SYS_AUX, Aux::XOSC_CLKSRC, xosc_freq), // SysClkSrc::Gpin0 => (Src::CLKSRC_CLK_SYS_AUX, Aux::CLKSRC_GPIN0, gpin0_freq),
+                                                                                       // SysClkSrc::Gpin1 => (Src::CLKSRC_CLK_SYS_AUX, Aux::CLKSRC_GPIN1, gpin1_freq),
         };
         let div = config.sys_clk.div_int as u64 * 256 + config.sys_clk.div_frac as u64;
         (src, aux, ((freq as u64 * 256) / div) as u32)

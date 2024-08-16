@@ -137,6 +137,8 @@
 use core::convert::Infallible;
 use core::future::Future;
 use core::mem;
+use core::mem::MaybeUninit;
+use core::ops::{Index, IndexMut};
 use core::pin::Pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use portable_atomic::{AtomicUsize, Ordering};
@@ -145,29 +147,92 @@ use pin_project::pin_project;
 
 use crate::util::Captures;
 
-/// In order to allow custom timer implementations (apart from systick), this trait can be used to
-/// hook into the executor scheduling process.
-pub trait Hooks {
-    /// Run before scheduler is started on `core`
-    fn init_core(&self, core: usize);
-    /// Run before we poll woken up tasks on `core`
-    fn before_poll(&self, core: usize);
-    /// Run before we poll woken up tasks on `core`
-    fn after_poll(&self, core: usize);
+/// Trait used to implement multicore operations. This is mainly for
+///
+pub trait Multicore {
+    /// Returns currently running core
+    fn cpuid() -> usize;
+    /// During scheduling, cores regularly park themselves using the `wfi` instruction.
+    /// This method should perform platform-specific interrupt to wake up the given core.
+    fn wake_cpu(core: usize);
 }
+
+extern "C" {
+    // Allows pac crates to transparently provide cpuid implementation
+    fn _lilos_cpuid() -> usize;
+    fn _lilos_wake_cpu(cpu: usize);
+}
+
+/// Provide implementation of cpuid for multicore environments
+#[macro_export]
+macro_rules! provide_multicore_impl {
+    ($name:ident) => {
+        #[no_mangle]
+        fn _lilos_cpuid() -> usize {
+            <$name as $crate::exec::Multicore>::cpuid()
+        }
+        #[no_mangle]
+        fn _lilos_wake_cpu(cpu: usize) {
+            <$name as $crate::exec::Multicore>::wake_cpu(cpu)
+        }
+    };
+}
+
+/// Type used to store wake masks. [usize] is used because it guarantees to be one word sized.
+/// When `multicore` feature is enabled, we split the wake mask into two 16 bit masks, one for each
+/// core. [lilos::exec] implementation is written to support multicore operation transparently
+pub type WakeMask = usize;
+
+/// Atomic variant of [WakeMask]
+pub type AtomicWakeMask = AtomicUsize;
+
+/// Returns the currently running core.
+///
+/// Internally just calls the `_lilos_cpuid` PAC hook.
+pub fn cpuid() -> usize {
+    unsafe { _lilos_cpuid() }
+}
+
+/// Wakes up the given core (if it was put to sleep using `wfi`).
+///
+/// Internally just calls `_lilos_wake_cpu` PAC hook
+pub fn wake_core(cpu: usize) {
+    unsafe { _lilos_wake_cpu(cpu) }
+}
+
+/// How many cores are we running with. This constant can be changed by the `multicore` feature.
+pub const CORES: usize = if cfg!(feature = "multicore") { 2 } else { 1 };
+
+// TODO: This works for 1 or 2 cores, does not work for 4 cores.
+/// How many bits in the mask are per one core
+pub const CORE_NBITS: usize = 1 << (usize::BITS.ilog2() - CORES.ilog2());
+/// Mask used to implement X mod (number of cores).
+pub const CORE_INDEX_MASK: usize = CORE_NBITS - 1;
+/// Bitmask for selecting wake bits of one core.
+pub const CORE_BITS_MASK: usize = 1 << (CORE_NBITS - 1) | ((1 << (CORE_NBITS - 1)) - 1);
 
 
 /// Accumulates bitmasks from wakers as they are invoked. The executor
 /// atomically checks and clears this at each iteration.
-static WAKE_BITS: AtomicUsize = AtomicUsize::new(0);
+static WAKE_BITS: AtomicWakeMask = AtomicWakeMask::new(0);
 
 /// Computes the wake bit mask for the task with the given index, which is
 /// equivalent to `1 << (index % USIZE_BITS)`.
-const fn wake_mask_for_index(index: usize) -> usize {
+const fn wake_mask_for_index(core: usize, index: usize) -> WakeMask {
     // Lossy as-cast used here because rotate_left implies a mod by small power
     // of 2 (32, 64) and `as u32` implies mod by 2**32, which doesn't change the
     // result.
-    1_usize.rotate_left(index as u32)
+    // CORE_INDEX_MASK performs index mod 32 in single core system, and mod 16 in
+    // dualcore system (we have 16 bits per core in that case).
+    // second shift (core << CORE_NBITS) shifts the mask into place.
+    // With multicore: when waking core 0, this is a noop, when waking core 1,
+    // this shifts the mask bits into the upper 16 bits.
+    (1_usize << (index & CORE_INDEX_MASK) as u32) << (core * CORE_NBITS) as u32
+}
+/// Computes the wake mask for core. This wake mask wakes all tasks on a given core,
+/// or can be used to select wake bits ONLY for a given core.
+const fn wake_mask_for_core(core: usize) -> WakeMask {
+    CORE_BITS_MASK << (core * CORE_NBITS) as u32
 }
 
 /// VTable for our wakers. Our wakers store a task notification bitmask in their
@@ -183,11 +248,11 @@ static VTABLE: RawWakerVTable = RawWakerVTable::new(
     |_| (),
 );
 
-/// Produces a `Waker` that will wake *at least* task `index` on invocation.
+/// Produces a `Waker` that will wake *at least* task `index` on `core`.
 ///
-/// Technically, this will wake any task `n` where `n % 32 == index % 32`.
-fn waker_for_task(index: usize) -> Waker {
-    let mask = wake_mask_for_index(index);
+/// Waker will wake any task `n` where `n % (32 / CORES) == index % (32 / CORES)`.
+fn waker_for_task(core: usize, index: usize) -> Waker {
+    let mask = wake_mask_for_index(core, index);
     // Safety: Waker::from_raw is unsafe because bad things happen if the
     // combination of this particular pointer and the functions in the vtable
     // don't meet the Waker contract or are incompatible. In our case, our
@@ -206,7 +271,7 @@ fn waker_for_task(index: usize) -> Waker {
 ///
 /// In practice this function compiles down to a single inlined load
 /// instruction.
-fn extract_mask(waker: &Waker) -> usize {
+fn extract_mask(waker: &Waker) -> WakeMask {
     // Determine whether the pointer member comes first or second within the
     // representation of RawWaker. This is currently compile-time simplified
     // and goes away.
@@ -216,9 +281,8 @@ fn extract_mask(waker: &Waker) -> usize {
     // pointer to an integer. Transmuting the _other_ direction would be very
     // unsafe.
     let ptr_first = unsafe {
-        let (cell0, _) = mem::transmute::<Waker, (usize, usize)>(
-            Waker::from_raw(RawWaker::new(1234 as *const (), &VTABLE)),
-        );
+        let (cell0, _) =
+            mem::transmute::<Waker, (usize, usize)>(Waker::from_raw(RawWaker::new(1234 as *const (), &VTABLE)));
         cell0 == 1234usize
     };
 
@@ -238,10 +302,113 @@ fn extract_mask(waker: &Waker) -> usize {
     }
 }
 
+/// Notifies the executor that any tasks whose wake bits are set in `mask`
+/// should be polled on the next iteration.
+///
+/// This is a very low-level operation and is rarely what you want to use. See
+/// `Notify`.
+#[inline(never)]
+pub fn wake_tasks_by_mask(mask: WakeMask) {
+    WAKE_BITS.fetch_or(mask, Ordering::SeqCst);
+    for core in 0..CORES {
+        if mask & wake_mask_for_core(core) != 0 && core != cpuid(){
+            wake_core(core)
+        }
+    }
+}
+
+/// Notifies the executor that the task with the given `index` should be polled
+/// on the next iteration.
+///
+/// This operation isn't precise: it may wake other tasks, but it is guaranteed
+/// to at least wake the desired task.
+#[inline(always)]
+pub fn wake_task_by_index(core: usize, index: usize) {
+    wake_tasks_by_mask(wake_mask_for_index(core, index));
+}
+
+/// Structure that allows us to work on a per-core basis. This allows for certain things
+/// (Like executor wake bits) to be sharded. If you have some core-specific peripherals,
+/// it might be useful to store state in [PerCore], and only operate core-local copy.
+///
+/// Lilos is intended to be run on embedded devices, so no padding to prevent false cache sharing
+/// is added.
+#[derive(Debug, Clone, Copy)]
+pub struct PerCore<T>(pub [T; CORES]);
+
+impl<T> Index<usize> for PerCore<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<T> IndexMut<usize> for PerCore<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+impl<T> PerCore<T> {
+    /// Executes closure on elements belonging to each core
+    pub fn on_all<R>(&self, f: impl Fn(&T) -> R) -> [R; CORES] {
+        let mut res: [MaybeUninit<R>; CORES] = [const { MaybeUninit::uninit() }; CORES];
+        for i in 0..CORES {
+            res[i].write(f(&self.0[i]));
+        }
+        unsafe { res.map(|r| r.assume_init()) }
+    }
+
+    /// Executes closure on elements belonging to each core.
+    pub fn on_all_mut<R>(&mut self, f: impl Fn(&mut T) -> R) -> [R; CORES] {
+        let mut res: [MaybeUninit<R>; CORES] = [const { MaybeUninit::uninit() }; CORES];
+        for i in 0..CORES {
+            res[i].write(f(&mut self.0[i]));
+        }
+        unsafe { res.map(|r| r.assume_init()) }
+    }
+
+    /// Executes a closure on an element belonging to a single core
+    pub fn on_core<R>(&self, core: usize, f: impl Fn(&T) -> R) -> R {
+        f(&self.0[core])
+    }
+
+    /// Mutably executes a closure on an element belonging to a single core
+    pub fn on_core_mut<R>(&mut self, core: usize, f: impl Fn(&mut T) -> R) -> R {
+        f(&mut self.0[core])
+    }
+
+    /// Executes a closure on an element belonging to current core.
+    /// current core is determined using the `_lilos_cpuid` hook
+    pub fn on_current<R>(&self, f: impl Fn(&T) -> R) -> R {
+        self.on_core(cpuid(), f)
+    }
+    ///  Mutably executes a closure on an element belonging to current core.
+    /// current core is determined using the `_lilos_cpuid` hook
+    pub fn on_current_mut<R>(&mut self, f: impl Fn(&mut T) -> R) -> R {
+        self.on_core_mut(cpuid(), f)
+    }
+}
+
+/// Allows hooking into the scheduling process.
+///
+/// A single [Hooks] instance will be shared between all cores. If you need
+/// to store per-core data, use a [PerCore] wrapper.
+pub trait Hooks {
+    /// Run before scheduler is started on `core`
+    fn init_core(&self, core: usize);
+    /// Run before we poll woken up tasks on `core`
+    fn before_poll(&self, core: usize);
+    /// Run before we poll woken up tasks on `core`
+    fn after_poll(&self, core: usize);
+}
+
 /// Polls `future` in a context where the `Waker` will signal the task with
 /// index `index`.
 fn poll_task(index: usize, future: Pin<&mut dyn Future<Output = Infallible>>) {
-    match future.poll(&mut Context::from_waker(&waker_for_task(index))) {
+    #![allow(unreachable_patterns)]
+    match future.poll(&mut Context::from_waker(&waker_for_task(cpuid(), index))) {
         Poll::Pending => (),
         Poll::Ready(never) => match never {},
     }
@@ -339,35 +506,29 @@ impl Interrupts {
 /// until an interrupt arrives. This has the advantages of using less power and
 /// having more predictable response latency than spinning. If you'd like to
 /// override this behavior, see [`run_tasks_with_idle`].
-pub fn run_tasks(
+pub fn schedule(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
-    hooks: &[&dyn Hooks],
-    initial_mask: usize,
+    hooks: &[&(dyn Hooks)],
+    initial_mask: WakeMask,
 ) -> ! {
     // Safety: we're passing Interrupts::Masked, the always-safe option
     unsafe {
-        run_tasks_with_preemption_and_idle(
-            futures,
-            hooks,
-            initial_mask,
-            Interrupts::Masked,
-            || {
-                cortex_m::asm::wfi();
-                // This works around an undocumented erratum on STM32 processors
-                // when WFI is set to go to "Sleep" level, and a debug agent has
-                // set the DBGMCU bits to cause clocks to continue to run during
-                // sleep. In this situation, it appears that the pipeline state
-                // after the WFI can be corrupted in the specific case where the
-                // WFI happens _without_ an interrupt service routine occurring
-                // (i.e. our default configuration of interrupts masked). An ISB
-                // appears to fix it, independent of alignment etc.
-                //
-                // Hard to tell, though, since this isn't in the errata sheet.
-                //
-                // On non-STM32 Cortex processors this will cost a few cycles.
-                cortex_m::asm::isb();
-            },
-        )
+        schedule_with_preemption_and_idle(futures, hooks, initial_mask, Interrupts::Masked, || {
+            cortex_m::asm::wfi();
+            // This works around an undocumented erratum on STM32 processors
+            // when WFI is set to go to "Sleep" level, and a debug agent has
+            // set the DBGMCU bits to cause clocks to continue to run during
+            // sleep. In this situation, it appears that the pipeline state
+            // after the WFI can be corrupted in the specific case where the
+            // WFI happens _without_ an interrupt service routine occurring
+            // (i.e. our default configuration of interrupts masked). An ISB
+            // appears to fix it, independent of alignment etc.
+            //
+            // Hard to tell, though, since this isn't in the errata sheet.
+            //
+            // On non-STM32 Cortex processors this will cost a few cycles.
+            cortex_m::asm::isb();
+        })
     }
 }
 
@@ -378,22 +539,14 @@ pub fn run_tasks(
 /// WFI yourself from within the implementation of `idle_hook`.
 ///
 /// See [`run_tasks`] for more details.
-pub fn run_tasks_with_idle(
+pub fn schedule_with_idle(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
-    hooks: &mut [&dyn Hooks],
-    initial_mask: usize,
+    hooks: &mut [&(dyn Hooks)],
+    initial_mask: WakeMask,
     idle_hook: impl FnMut(),
 ) -> ! {
     // Safety: we're passing Interrupts::Masked, the always-safe option
-    unsafe {
-        run_tasks_with_preemption_and_idle(
-            futures,
-            hooks,
-            initial_mask,
-            Interrupts::Masked,
-            idle_hook,
-        )
-    }
+    unsafe { schedule_with_preemption_and_idle(futures, hooks, initial_mask, Interrupts::Masked, idle_hook) }
 }
 
 /// Extended version of `run_tasks` that configures the scheduler with a custom
@@ -416,22 +569,14 @@ pub fn run_tasks_with_idle(
 /// Note that none of the top-level functions in this module are safe to use
 /// from a custom ISR. Only operations on types that are specifically described
 /// as being ISR safe, such as `Notify::notify`, can be used from ISRs.
-pub unsafe fn run_tasks_with_preemption(
+pub unsafe fn schedule_with_preemption(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
-    hooks: &mut [&dyn Hooks],
-    initial_mask: usize,
+    hooks: &mut [&(dyn Hooks)],
+    initial_mask: WakeMask,
     interrupts: Interrupts,
 ) -> ! {
     // Safety: this is safe if our own contract is upheld.
-    unsafe {
-        run_tasks_with_preemption_and_idle(
-            futures,
-            hooks,
-            initial_mask,
-            interrupts,
-            cortex_m::asm::wfi,
-        )
-    }
+    unsafe { schedule_with_preemption_and_idle(futures, hooks, initial_mask, interrupts, || cortex_m::asm::wfi()) }
 }
 
 /// Extended version of `run_tasks` that configures the scheduler with a custom
@@ -457,62 +602,40 @@ pub unsafe fn run_tasks_with_preemption(
 /// Note that none of the top-level functions in this module are safe to use
 /// from a custom ISR. Only operations on types that are specifically described
 /// as being ISR safe, such as `Notify::notify`, can be used from ISRs.
-pub unsafe fn run_tasks_with_preemption_and_idle(
+pub unsafe fn schedule_with_preemption_and_idle(
     futures: &mut [Pin<&mut dyn Future<Output = Infallible>>],
-    hooks: &[&dyn Hooks],
-    initial_mask: usize,
+    hooks: &[&(dyn Hooks)],
+    initial_mask: WakeMask,
     interrupts: Interrupts,
     mut idle_hook: impl FnMut(),
 ) -> ! {
-    // Record the task futures for debugger access.
-    {
-        // Degrade &mut[] to *mut[]
-        let futures_ptr: *mut [Pin<&mut dyn Future<Output = Infallible>>] =
-            futures;
-        // Change interpretation of the Pins; this assumes that &mut and *mut
-        // have equivalent representation! But we want to store *mut into the
-        // static because
-        // 1. It grants no authority without unsafe, so the fact that it aliases
-        //    an array we intend to keep using is nbd.
-        // 2. It relieves us from having to pretend the array has static
-        //    lifetime, which it does _not._ Casting it to `&'static mut` would
-        //    be wrong.
-        let futures_ptr: *mut [Pin<*mut dyn Future<Output = Infallible>>] =
-            futures_ptr as _;
-        // Stash the task future array in a known location.
-        //
-        // Safety: this is written by code but never read back, so the fact that
-        // it's a static mut has no effect on code other than the warning.
-        unsafe {
-            TASK_FUTURES = Some(futures_ptr);
-        }
-    }
+    let current_core = cpuid();
+    let current_core_mask = wake_mask_for_core(current_core);
 
-    WAKE_BITS.store(initial_mask, Ordering::SeqCst);
+    WAKE_BITS.or(initial_mask & current_core_mask, Ordering::SeqCst);
 
-    hooks.iter().for_each(|plug| plug.init_core(0));
+    let futures_ptr: *mut [Pin<&mut dyn Future<Output = Infallible>>] = futures;
+    let futures_ptr: *mut [Pin<*mut dyn Future<Output = Infallible>>] = futures_ptr as _;
 
+    unsafe { TASK_FUTURES[current_core] = Some(futures_ptr); }
+
+    hooks.iter().for_each(|hook| hook.init_core(current_core));
 
     loop {
         interrupts.scope(|| {
-            hooks.iter().for_each(|plug| plug.before_poll(0));
-            // Capture and reset wake bits, then process any 1s.
-            // TODO: this loop visits every future testing for 1 bits; it would
-            // almost certainly be faster to visit the futures corresponding to
-            // 1 bits instead. I have avoided this for now because of the
-            // increased complexity.
-            let mask = WAKE_BITS.swap(0, Ordering::SeqCst);
-            if mask != 0 {
-                for (i, f) in futures.iter_mut().enumerate() {
-                    if mask & wake_mask_for_index(i) != 0 {
-                        poll_task(i, f.as_mut());
-                    }
+            // Run scheduler hooks
+            hooks.iter().for_each(|hook| hook.before_poll(current_core));
+            // Fetch the old mask, and remove our activated bits.
+            let mask = WAKE_BITS.fetch_and(!current_core_mask, Ordering::SeqCst);
+            for (i, f) in futures.iter_mut().enumerate() {
+                if mask & wake_mask_for_index(current_core, i) != 0 {
+                    poll_task(i, f.as_mut());
                 }
             }
-            hooks.iter().for_each(|plug| plug.after_poll(0));
+            hooks.iter().for_each(|hook| hook.after_poll(current_core));
             // If none of the futures woke each other, we're relying on an
             // interrupt to set bits -- so we can sleep waiting for it.
-            if WAKE_BITS.load(Ordering::SeqCst) == 0 {
+            if WAKE_BITS.load(Ordering::SeqCst) & current_core_mask  == 0 {
                 idle_hook();
             }
         });
@@ -537,9 +660,7 @@ pub unsafe fn run_tasks_with_preemption_and_idle(
 /// Note that the `#[used]` annotation is load-bearing here -- without it the
 /// compiler will happily throw the variable away, confusing the debugger.
 #[used]
-static mut TASK_FUTURES: Option<
-    *mut [Pin<*mut dyn Future<Output = Infallible>>],
-> = None;
+static mut TASK_FUTURES: PerCore<Option<*mut [Pin<*mut dyn Future<Output = Infallible>>]>> = PerCore([None; CORES]);
 
 /// Constant that can be passed to `run_tasks` and `wake_tasks_by_mask` to mean
 /// "all tasks."
@@ -624,14 +745,14 @@ pub const ALL_TASKS: usize = !0;
 /// an ISR.
 #[derive(Debug, Default)]
 pub struct Notify {
-    mask: AtomicUsize,
+    mask: AtomicWakeMask,
 }
 
 impl Notify {
     /// Creates a new `Notify` with no tasks waiting.
     pub const fn new() -> Self {
         Self {
-            mask: AtomicUsize::new(0),
+            mask: AtomicWakeMask::new(0),
         }
     }
 
@@ -841,26 +962,6 @@ where
     }
 }
 
-/// Notifies the executor that any tasks whose wake bits are set in `mask`
-/// should be polled on the next iteration.
-///
-/// This is a very low-level operation and is rarely what you want to use. See
-/// `Notify`.
-#[inline(always)]
-pub fn wake_tasks_by_mask(mask: usize) {
-    WAKE_BITS.fetch_or(mask, Ordering::SeqCst);
-}
-
-/// Notifies the executor that the task with the given `index` should be polled
-/// on the next iteration.
-///
-/// This operation isn't precise: it may wake other tasks, but it is guaranteed
-/// to at least wake the desired task.
-#[inline(always)]
-pub fn wake_task_by_index(index: usize) {
-    wake_tasks_by_mask(wake_mask_for_index(index));
-}
-
 /// Returns a future that will be pending exactly once before resolving.
 ///
 /// This can be used to give up CPU to any other tasks that are currently ready
@@ -883,10 +984,7 @@ struct YieldCpu {
 impl Future for YieldCpu {
     type Output = ();
 
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if mem::replace(&mut self.polled, true) {
             Poll::Ready(())
         } else {

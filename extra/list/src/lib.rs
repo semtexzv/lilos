@@ -155,10 +155,7 @@ impl<T> List<T> {
     /// Returns `true` if any nodes were awoken, `false` if none were (either
     /// because the list is empty, or because the first node failed the
     /// predicate).
-    pub fn wake_while(
-        self: Pin<&Self>,
-        mut pred: impl FnMut(&T) -> bool,
-    ) -> bool {
+    pub fn wake_while(self: Pin<&Self>, mut pred: impl FnMut(&T) -> bool) -> bool {
         let mut any = false;
         loop {
             if !self.wake_head_if(&mut pred) {
@@ -181,10 +178,7 @@ impl<T> List<T> {
     ///
     /// Returns `true` if there was a head node and it passed, `false` if it
     /// didn't pass or didn't exist.
-    pub fn wake_head_if(
-        self: Pin<&Self>,
-        pred: impl FnOnce(&T) -> bool,
-    ) -> bool {
+    pub fn wake_head_if(self: Pin<&Self>, pred: impl FnOnce(&T) -> bool) -> bool {
         let Some(root) = self.root.get() else {
             return false;
         };
@@ -214,17 +208,12 @@ impl<T> List<T> {
             self.root.set(None);
         } else {
             // Unlink this node from its neighbor.
-            let Some(next_ptr) = node.next.take() else {
-                panic!()
-            };
+            let Some(next_ptr) = node.next.take() else { panic!() };
             // Safety: dereferencing and pinning the neighbor pointer is safe
             // per the Link Valid Invariant.
             let next = unsafe { Pin::new_unchecked(next_ptr.as_ref()) };
             next.prev.set(None);
-            self.root.set(Some(Root {
-                head: next_ptr,
-                ..root
-            }));
+            self.root.set(Some(Root { head: next_ptr, ..root }));
         }
 
         node.list.take();
@@ -265,10 +254,7 @@ impl<T> List<T> {
     /// Dropping the future before it resolves loses its place in line. If there
     /// are other nodes that are equal to `contents`, dropping and recreating
     /// the future will move this waiter after those other nodes.
-    pub fn join(
-        self: Pin<&Self>,
-        contents: T,
-    ) -> impl Future<Output = ()> + Captures<&'_ Self>
+    pub fn join(self: Pin<&Self>, contents: T) -> impl Future<Output = ()> + Captures<&'_ Self>
     where
         T: PartialOrd,
     {
@@ -347,10 +333,7 @@ struct WaitForDetach<'list, T> {
 impl<T: PartialOrd> Future for WaitForDetach<'_, T> {
     type Output = ();
 
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         let p = self.project();
         let node = p.node.into_ref();
         let node_ptr = NonNull::from(&*node);
@@ -367,8 +350,7 @@ impl<T: PartialOrd> Future for WaitForDetach<'_, T> {
                 while let Some(cand_ptr) = maybe_cand {
                     // Safety: dereferencing and pinning the node pointer is
                     // safe per the Link Valid Invariant.
-                    let candidate =
-                        unsafe { Pin::new_unchecked(cand_ptr.as_ref()) };
+                    let candidate = unsafe { Pin::new_unchecked(cand_ptr.as_ref()) };
 
                     if candidate.contents <= node.contents {
                         // This is the right place for it. `candidate` will
@@ -377,9 +359,7 @@ impl<T: PartialOrd> Future for WaitForDetach<'_, T> {
                         if let Some(next_ptr) = old_next {
                             // Safety: dereferencing and pinning the node
                             // pointer is safe per the Link Valid Invariant.
-                            let next = unsafe {
-                                Pin::new_unchecked(next_ptr.as_ref())
-                            };
+                            let next = unsafe { Pin::new_unchecked(next_ptr.as_ref()) };
                             next.prev.set(Some(node_ptr));
                         }
                         node.next.set(old_next);
@@ -398,8 +378,7 @@ impl<T: PartialOrd> Future for WaitForDetach<'_, T> {
                     // node is becoming the new head of the list!
                     // Safety: dereferencing and pinning the head pointer is
                     // safe per the Link Valid Invariant.
-                    let old_head =
-                        unsafe { Pin::new_unchecked(root.head.as_ref()) };
+                    let old_head = unsafe { Pin::new_unchecked(root.head.as_ref()) };
                     old_head.prev.set(Some(node_ptr));
                     node.next.set(Some(root.head));
                     root.head = node_ptr;
@@ -464,10 +443,7 @@ impl<T, F: FnOnce()> PinnedDrop for WaitWithCleanup<'_, T, F> {
 impl<T: PartialOrd, F: FnOnce()> Future for WaitWithCleanup<'_, T, F> {
     type Output = ();
 
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         let p = self.project();
         if p.inner.poll(cx).is_ready() {
             // The inner future has resolved -- we no longer need the cleanup
@@ -715,10 +691,7 @@ mod tests {
         let count = Arc::new(AtomicUsize::new(0));
         let second_count = Arc::clone(&count);
         (count, unsafe {
-            Waker::from_raw(RawWaker::new(
-                Arc::into_raw(second_count) as *const (),
-                &VTABLE,
-            ))
+            Waker::from_raw(RawWaker::new(Arc::into_raw(second_count) as *const (), &VTABLE))
         })
     }
 
@@ -855,8 +828,7 @@ mod tests {
         let cleanup_called = Cell::new(false);
 
         {
-            let mut fut =
-                pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
+            let mut fut = pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
             assert!(!cleanup_called.get());
             // Poll so that the node attaches itself.
             let _ = fut.as_mut().poll(&mut ctx);
@@ -889,8 +861,7 @@ mod tests {
         // Once the node has been pinned it becomes hard to drop explicitly, but
         // we can do it with a scope:
         {
-            let mut fut =
-                pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
+            let mut fut = pin!(list.join_with_cleanup((), || cleanup_called.set(true),));
 
             // Poll the insert future to cause the node to link up.
             let _ = fut.as_mut().poll(&mut ctx);

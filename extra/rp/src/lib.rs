@@ -1,14 +1,15 @@
 #![deny(dead_code)]
 #![cfg_attr(not(test), no_std)]
 
-
+pub mod clocks;
 pub mod dma;
 pub mod gpio;
 pub mod spi;
-pub mod clocks;
 
-pub(crate) mod reset;
 mod critical_section_impl;
+#[cfg(feature = "multicore")]
+pub mod multicore;
+pub(crate) mod reset;
 
 extern crate rp_pac as pac;
 

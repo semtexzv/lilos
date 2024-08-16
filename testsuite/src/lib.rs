@@ -181,8 +181,7 @@ async fn task_coordinator() -> Infallible {
     // and lilos time halts during any semihosting operation. Think of it as the
     // "user" timing on Unix, while the time spent playing around in openocd is
     // "sys".
-    const TEST_TIMEOUT: core::time::Duration =
-        core::time::Duration::from_millis(1000);
+    const TEST_TIMEOUT: core::time::Duration = core::time::Duration::from_millis(1000);
 
     match time::with_timeout(TEST_TIMEOUT, tests).await {
         Some(()) => {
@@ -207,10 +206,7 @@ async fn test_other_tasks_started() {
     // Let all initially-started tasks run.
     exec::yield_cpu().await;
     // Check that the auto flag got set.
-    assert!(
-        AUTO_FLAG.load(Ordering::SeqCst),
-        "flag_auto task not started?"
-    );
+    assert!(AUTO_FLAG.load(Ordering::SeqCst), "flag_auto task not started?");
     // Check that the manual flag did _not._
     assert!(
         !MUST_START_FLAG.load(Ordering::SeqCst),
@@ -219,10 +215,7 @@ async fn test_other_tasks_started() {
     // Start the manual flag task.
     start_task_by_index(2).await;
     // Manual flag should be set now.
-    assert!(
-        MUST_START_FLAG.load(Ordering::SeqCst),
-        "flag_manual not started?"
-    );
+    assert!(MUST_START_FLAG.load(Ordering::SeqCst), "flag_manual not started?");
     // Non-started manual flag should still be clear.
     assert!(
         !MUST_NOT_START_FLAG.load(Ordering::SeqCst),

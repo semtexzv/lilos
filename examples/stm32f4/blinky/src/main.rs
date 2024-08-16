@@ -61,10 +61,7 @@ fn main() -> ! {
 
     // Run our four tasks in parallel. The final parameter specifies which tasks
     // to poll on the first iteration.
-    lilos::exec::run_tasks(
-        &mut [fut1, fut2, fut3, fut4],
-        lilos::exec::ALL_TASKS,
-    )
+    lilos::exec::run_tasks(&mut [fut1, fut2, fut3, fut4], lilos::exec::ALL_TASKS)
 }
 
 /// Blinks LED(s) attached to GPIOD as a concurrent process.
@@ -76,11 +73,7 @@ fn main() -> ! {
 /// Each call to `blinky` produces a `Future` that captures its parameters. The
 /// `Future` loops forever, as indicated by its "never resolves" return type,
 /// `!`.
-async fn blinky(
-    pin_mask: u16,
-    interval: Duration,
-    gpiod: device::gpio::Gpio,
-) -> Infallible {
+async fn blinky(pin_mask: u16, interval: Duration, gpiod: device::gpio::Gpio) -> Infallible {
     // Zero-extend the mask to fit the BSRR register.
     let pin_mask = u32::from(pin_mask);
 

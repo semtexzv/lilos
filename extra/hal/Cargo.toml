@@ -1,15 +1,15 @@
 [package]
 name = "lilos-hal"
-version = "0.1.0"
+version = "0.0.0"
+authors = ["Michal Hornicky <semtexzv@gmail.com>"]
+description = "A hardware abstraction crate for lilos"
+keywords = ["async", "embedded", "os"]
+categories = ["embedded", "no-std"]
+license = "MIT OR Apache-2.0"
+
 edition.workspace = true
-license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-categories = [
-    "embedded",
-    "no-std",
-    "asynchronous",
-]
 
 build = "build.rs"
 

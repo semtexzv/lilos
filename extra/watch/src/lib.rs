@@ -143,10 +143,7 @@ impl<T> Watch<T> {
     /// contents as novel by calling [`Receiver::mark_as_unseen`].
     pub fn subscribe(&self) -> Receiver<'_, T> {
         let version = self.version.get();
-        Receiver {
-            version,
-            shared: self,
-        }
+        Receiver { version, shared: self }
     }
 }
 

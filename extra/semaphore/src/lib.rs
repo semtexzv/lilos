@@ -145,9 +145,7 @@ impl Semaphore {
     /// one is available immediately, or `Err` if they are all taken.
     pub fn try_acquire(&self) -> Result<(), NoPermits> {
         self.available
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |a| {
-                a.checked_sub(1)
-            })
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |a| a.checked_sub(1))
             .map_err(|_| NoPermits)?;
         Ok(())
     }

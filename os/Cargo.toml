@@ -21,6 +21,7 @@ default = ["mutex", "spsc", "systick"]
 mutex = []
 spsc = []
 systick = []
+multicore = []
 
 [dependencies]
 cfg-if.workspace = true

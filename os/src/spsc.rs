@@ -89,8 +89,7 @@ impl<'s, T> Queue<'s, T> {
         // memory backing `storage`, and the caller thinks of it as
         // `MaybeUninit`, meaning they aren't making assumptions about its
         // contents or dropping it when we're done.
-        let storage: &'s mut [UnsafeCell<MaybeUninit<T>>] =
-            unsafe { &mut *storage };
+        let storage: &'s mut [UnsafeCell<MaybeUninit<T>>] = unsafe { &mut *storage };
         Self {
             storage,
             head: AtomicUsize::new(0),

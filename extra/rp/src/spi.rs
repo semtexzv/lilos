@@ -1,13 +1,12 @@
 //! Serial Peripheral Interface
 
+use crate::dma::{AnyChannel, Channel};
+use crate::gpio::{AnyPin, Pin as GpioPin, SealedPin as _};
+use crate::{into_ref, pac, peripherals, Peripheral, PeripheralRef};
 use core::marker::PhantomData;
 use embedded_hal_02::spi::{Phase, Polarity};
 use lilos_hal::future::join;
 use lilos_hal::SetConfig;
-use crate::dma::{AnyChannel, Channel};
-use crate::gpio::{AnyPin, Pin as GpioPin, SealedPin as _};
-use crate::{pac, peripherals, Peripheral, PeripheralRef, into_ref};
-
 
 /// SPI errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,7 +379,12 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
         let tx_transfer = unsafe {
             // If we don't assign future to a variable, the data register pointer
             // is held across an await and makes the future non-Send.
-            crate::dma::write(tx_ch, buffer, self.inner.regs().dr().as_ptr() as *mut _, T::TX_DREQ.to_bits())
+            crate::dma::write(
+                tx_ch,
+                buffer,
+                self.inner.regs().dr().as_ptr() as *mut _,
+                T::TX_DREQ.to_bits(),
+            )
         };
         tx_transfer.await;
 
@@ -405,7 +409,12 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
         let rx_transfer = unsafe {
             // If we don't assign future to a variable, the data register pointer
             // is held across an await and makes the future non-Send.
-            crate::dma::read(rx_ch, self.inner.regs().dr().as_ptr() as *const _, buffer, T::RX_DREQ.to_bits())
+            crate::dma::read(
+                rx_ch,
+                self.inner.regs().dr().as_ptr() as *const _,
+                buffer,
+                T::RX_DREQ.to_bits(),
+            )
         };
 
         let tx_ch = self.tx_dma.as_mut().unwrap();
@@ -440,7 +449,12 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
         let rx_transfer = unsafe {
             // If we don't assign future to a variable, the data register pointer
             // is held across an await and makes the future non-Send.
-            crate::dma::read(rx_ch, self.inner.regs().dr().as_ptr() as *const _, rx, T::RX_DREQ.to_bits())
+            crate::dma::read(
+                rx_ch,
+                self.inner.regs().dr().as_ptr() as *const _,
+                rx,
+                T::RX_DREQ.to_bits(),
+            )
         };
 
         let mut tx_ch = self.tx_dma.as_mut().unwrap();
@@ -455,7 +469,8 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
                     let write_bytes_len = (&*rx).len() - (&*tx).len();
                     // write dummy data
                     // this will disable incrementation of the buffers
-                    crate::dma::write_repeated(tx_ch, p.dr().as_ptr() as *mut u8, write_bytes_len, T::TX_DREQ.to_bits()).await
+                    crate::dma::write_repeated(tx_ch, p.dr().as_ptr() as *mut u8, write_bytes_len, T::TX_DREQ.to_bits())
+                        .await
                 }
             }
         };

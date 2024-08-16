@@ -1,17 +1,16 @@
+use crate::interrupt;
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{compiler_fence, Ordering};
 use core::task::{Context, Poll};
 use lilos::exec::Notify;
+use lilos_hal::interrupt::InterruptExt;
 use lilos_hal::{impl_peripheral, into_ref, Peripheral, PeripheralRef};
 use rp_pac::dma::vals::{DataSize, TreqSel};
-use lilos_hal::interrupt::InterruptExt;
-use crate::interrupt;
 
 pub const CHANNEL_COUNT: usize = 12;
 const NEW_NOTIFY: Notify = Notify::new();
-pub static mut CHANNEL_WAKERS: [Notify; CHANNEL_COUNT] =
-    [NEW_NOTIFY; CHANNEL_COUNT];
+pub static mut CHANNEL_WAKERS: [Notify; CHANNEL_COUNT] = [NEW_NOTIFY; CHANNEL_COUNT];
 
 #[interrupt]
 unsafe fn DMA_IRQ_0() {
@@ -29,6 +28,7 @@ unsafe fn DMA_IRQ_0() {
     pac::DMA.ints(0).write_value(ints0);
 }
 
+/// Initialize the dma subsystem. Required if you use DMA or the SPI interfaces
 pub unsafe fn init() {
     interrupt::DMA_IRQ_0.disable();
     interrupt::DMA_IRQ_0.set_priority(interrupt::Priority::P3);
@@ -38,15 +38,12 @@ pub unsafe fn init() {
     interrupt::DMA_IRQ_0.enable();
 }
 
-
 trait SealedChannel {}
 trait SealedWord {}
 
 /// DMA channel interface.
 #[allow(private_bounds)]
-pub trait Channel:
-    Peripheral<P = Self> + SealedChannel + Into<AnyChannel> + Sized + 'static
-{
+pub trait Channel: Peripheral<P = Self> + SealedChannel + Into<AnyChannel> + Sized + 'static {
     /// Channel number.
     fn number(&self) -> u8;
 
@@ -57,9 +54,7 @@ pub trait Channel:
 
     /// Convert into type-erased [AnyChannel].
     fn degrade(self) -> AnyChannel {
-        AnyChannel {
-            number: self.number(),
-        }
+        AnyChannel { number: self.number() }
     }
 }
 
@@ -290,8 +285,7 @@ impl<'a, C: Channel> Future for Transfer<'a, C> {
         // We need to register/re-register the waker for each poll because any
         // calls to wake will deregister the waker.
         unsafe {
-            CHANNEL_WAKERS[self.channel.number() as usize]
-                .subscribe(cx.waker());
+            CHANNEL_WAKERS[self.channel.number() as usize].subscribe(cx.waker());
         }
 
         if self.channel.regs().ctrl_trig().read().busy() {

@@ -242,10 +242,7 @@ impl<T> Mutex<T> {
     }
 }
 
-#[deprecated(
-    since = "1.2.0",
-    note = "old-style initialization is complicated, see Mutex::create"
-)]
+#[deprecated(since = "1.2.0", note = "old-style initialization is complicated, see Mutex::create")]
 impl<T> Mutex<T> {
     /// Returns an initialized but invalid mutex.
     ///
@@ -315,9 +312,7 @@ impl<T> Mutex<CancelSafe<T>> {
     /// This API can be error-prone, which is why it's only available if you've
     /// asserted your guarded data is `CancelSafe`. When possible, see if you
     /// can do the job using [`Mutex::try_lock`] instead.
-    pub fn try_lock_assuming_cancel_safe(
-        self: Pin<&Self>,
-    ) -> Option<MutexGuard<'_, T>> {
+    pub fn try_lock_assuming_cancel_safe(self: Pin<&Self>) -> Option<MutexGuard<'_, T>> {
         if self.state.fetch_or(1, Ordering::Acquire) == 0 {
             Some(MutexGuard { mutex: self })
         } else {
@@ -370,9 +365,7 @@ impl<T> Mutex<CancelSafe<T>> {
     /// - If dropped after it has been given the mutex, but before it's been
     ///   polled (and thus given a chance to notice that), it will wake the next
     ///   waiter on the mutex wait list.
-    pub async fn lock_assuming_cancel_safe(
-        self: Pin<&Self>,
-    ) -> MutexGuard<'_, T> {
+    pub async fn lock_assuming_cancel_safe(self: Pin<&Self>) -> MutexGuard<'_, T> {
         // Complete synchronously if the mutex is uncontended.
         // TODO this is repeated above the loop to avoid the cost of re-setting
         // up the wait node in every loop iteration, and to avoid setting it up
@@ -462,8 +455,7 @@ macro_rules! create_static_mutex {
         // INIT check above. We can be confident we don't touch it again below
         // thanks to the block scope.
         let __m = unsafe {
-            static mut M: MaybeUninit<$crate::mutex::Mutex<$t>> =
-                MaybeUninit::uninit();
+            static mut M: MaybeUninit<$crate::mutex::Mutex<$t>> = MaybeUninit::uninit();
             &mut *core::ptr::addr_of_mut!(M)
         };
 
@@ -476,8 +468,7 @@ macro_rules! create_static_mutex {
         // Safety: this is the only mutable reference to M that will ever exist
         // in the program, so we can pin it as long as we don't touch M again
         // below (which we do not).
-        let m: Pin<&'static _> =
-            unsafe { Pin::new_unchecked(__m.assume_init_ref()) };
+        let m: Pin<&'static _> = unsafe { Pin::new_unchecked(__m.assume_init_ref()) };
         m
     }};
 }

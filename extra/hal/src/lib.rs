@@ -2,17 +2,20 @@
 #![allow(clippy::new_without_default)]
 #![warn(missing_docs)]
 
+//! Hardware abstraction layer utilities for per-chip/board crates targeting lilos.
+//! Heavily borrows from both lilos and embassy codebases.
+
 // This mod MUST go first, so that the others see its macros.
 pub(crate) mod fmt;
-pub mod macros;
-pub mod peripheral;
+#[macro_use]
+mod macros;
+mod peripheral;
 pub use peripheral::{Peripheral, PeripheralRef};
 
-
+pub mod future;
 #[cfg(feature = "cortex-m")]
 pub mod interrupt;
 pub mod ratio;
-pub mod future;
 
 /// Set the configuration of a peripheral driver.
 ///

@@ -6,9 +6,7 @@ use core::pin::{pin, Pin};
 use core::task::Poll;
 
 use crate::{poll_and_assert_not_ready, A_BIT};
-use lilos::{
-    create_mutex, create_static_mutex, mutex::CancelSafe, mutex::Mutex,
-};
+use lilos::{create_mutex, create_static_mutex, mutex::CancelSafe, mutex::Mutex};
 
 pub async fn test_stack() {
     create_mutex!(mutex, CancelSafe(42_usize));

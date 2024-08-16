@@ -158,9 +158,7 @@ impl<T> RwLock<T> {
     ///
     /// If there is an outstanding exclusive claim on the lock, this will fail
     /// with `Err(InUse)`.
-    pub fn try_lock_shared(
-        self: Pin<&Self>,
-    ) -> Result<SharedGuard<'_, T>, InUse> {
+    pub fn try_lock_shared(self: Pin<&Self>) -> Result<SharedGuard<'_, T>, InUse> {
         let lock = self.project_ref().lock.try_lock_shared()?;
         Ok(SharedGuard {
             _lock: lock,
@@ -214,9 +212,7 @@ impl<T> RwLock<T> {
     /// and you have read and understand the caveats described on the
     /// [`CancelSafe`] type, then have a look at
     /// [`Self::try_lock_exclusive_assuming_cancel_safe`].
-    pub fn try_lock_exclusive(
-        self: Pin<&Self>,
-    ) -> Result<ActionPermit<'_, T>, InUse> {
+    pub fn try_lock_exclusive(self: Pin<&Self>) -> Result<ActionPermit<'_, T>, InUse> {
         let lock = self.project_ref().lock.try_lock_exclusive()?;
         Ok(ActionPermit {
             _lock: lock,
@@ -364,9 +360,7 @@ impl LockImpl {
         ExclusiveInternal { lock: self }
     }
 
-    fn try_lock_exclusive(
-        self: Pin<&Self>,
-    ) -> Result<ExclusiveInternal<'_>, InUse> {
+    fn try_lock_exclusive(self: Pin<&Self>) -> Result<ExclusiveInternal<'_>, InUse> {
         let r = self.readers.get();
         if r == 0 {
             self.readers.set(-1);
@@ -384,10 +378,7 @@ impl LockImpl {
     // aliasing.
     unsafe fn release_exclusive(self: Pin<&Self>) {
         let prev = self.readers.get();
-        debug_assert!(
-            prev < 0,
-            "release_exclusive used with no exclusive lock outstanding"
-        );
+        debug_assert!(prev < 0, "release_exclusive used with no exclusive lock outstanding");
         self.readers.set(prev + 1);
 
         if prev == -1 {
@@ -398,9 +389,7 @@ impl LockImpl {
 
             // Wake a _single_ exclusive lock attempt if one exists at the head
             // of the queue.
-            if p.waiters
-                .wake_head_if(|Meta(access)| access == &Access::Exclusive)
-            {
+            if p.waiters.wake_head_if(|Meta(access)| access == &Access::Exclusive) {
                 // Record it, to keep it from getting scooped.
                 self.readers.set(-1);
             } else {
@@ -431,10 +420,7 @@ impl LockImpl {
     // aliasing.
     unsafe fn release_shared(self: Pin<&Self>) {
         let prev = self.readers.get();
-        debug_assert!(
-            prev > 0,
-            "release_shared used with no shared lock outstanding"
-        );
+        debug_assert!(prev > 0, "release_shared used with no shared lock outstanding");
         self.readers.set(prev - 1);
         match prev {
             1 => {
@@ -548,10 +534,7 @@ where
     /// least `usize::MAX/2`. This number is very difficult to reach in
     /// non-pathological code. However, if you reach it by splitting a reader,
     /// this will panic.
-    pub fn map_split<U, V>(
-        guard: Self,
-        f: impl FnOnce(&T) -> (&U, &V),
-    ) -> (SharedGuard<'a, U>, SharedGuard<'a, V>)
+    pub fn map_split<U, V>(guard: Self, f: impl FnOnce(&T) -> (&U, &V)) -> (SharedGuard<'a, U>, SharedGuard<'a, V>)
     where
         U: ?Sized,
         V: ?Sized,
@@ -661,10 +644,7 @@ impl<'a, T> ActionPermit<'a, T> {
     ///
     /// By transforming an existing writer, this leaves the writer count of the
     /// lock unchanged.
-    pub fn map<U>(
-        self,
-        projection: impl FnOnce(&mut T) -> &mut U,
-    ) -> ActionPermit<'a, U> {
+    pub fn map<U>(self, projection: impl FnOnce(&mut T) -> &mut U) -> ActionPermit<'a, U> {
         let Self { _lock, contents } = self;
         ActionPermit {
             _lock,
@@ -714,9 +694,7 @@ impl<T> RwLock<CancelSafe<T>> {
     /// On error, this returns `Err(InUse)`.
     ///
     /// See the docs on [`CancelSafe`] for more information.
-    pub fn try_lock_exclusive_assuming_cancel_safe(
-        self: Pin<&Self>,
-    ) -> Result<ExclusiveGuard<'_, T>, InUse> {
+    pub fn try_lock_exclusive_assuming_cancel_safe(self: Pin<&Self>) -> Result<ExclusiveGuard<'_, T>, InUse> {
         let ActionPermit { _lock, contents } = self.try_lock_exclusive()?;
         Ok(ExclusiveGuard {
             _lock,
@@ -734,13 +712,8 @@ impl<T> RwLock<CancelSafe<T>> {
     /// them before an `await` --- the compiler will not help you with this.
     ///
     /// See the docs on [`CancelSafe`] for more information.
-    pub async fn lock_exclusive_assuming_cancel_safe(
-        self: Pin<&Self>,
-    ) -> ExclusiveGuard<'_, T> {
-        let ActionPermit {
-            _lock: lock,
-            contents,
-        } = self.lock_exclusive().await;
+    pub async fn lock_exclusive_assuming_cancel_safe(self: Pin<&Self>) -> ExclusiveGuard<'_, T> {
+        let ActionPermit { _lock: lock, contents } = self.lock_exclusive().await;
         ExclusiveGuard {
             _lock: lock,
             contents: &mut contents.0,
@@ -772,10 +745,7 @@ impl<'a, T> ExclusiveGuard<'a, T> {
     /// sub-component `U`.
     ///
     /// The returned guard keeps the entire `T` locked for exclusive access.
-    pub fn map<U>(
-        self,
-        projection: impl FnOnce(&mut T) -> &mut U,
-    ) -> ExclusiveGuard<'a, U> {
+    pub fn map<U>(self, projection: impl FnOnce(&mut T) -> &mut U) -> ExclusiveGuard<'a, U> {
         let Self { _lock, contents } = self;
         ExclusiveGuard {
             _lock,

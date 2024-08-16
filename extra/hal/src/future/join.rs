@@ -35,7 +35,9 @@ impl<Fut: Future> MaybeDone<Fut> {
     fn take_output(&mut self) -> Fut::Output {
         match &*self {
             Self::Done(_) => {}
-            Self::Future(_) | Self::Gone => panic!("take_output when MaybeDone is not done."),
+            Self::Future(_) | Self::Gone => {
+                panic!("take_output when MaybeDone is not done.")
+            }
         }
         match mem::replace(self, Self::Gone) {
             MaybeDone::Done(output) => output,

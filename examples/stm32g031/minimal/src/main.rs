@@ -36,9 +36,7 @@ fn main() -> ! {
 
     // Configure our output pin, D12.
     device::RCC.gpioenr().modify(|w| w.set_gpiocen(true));
-    device::GPIOC
-        .moder()
-        .modify(|w| w.set_moder(6, Moder::OUTPUT));
+    device::GPIOC.moder().modify(|w| w.set_moder(6, Moder::OUTPUT));
 
     // Create a task to blink the LED. You could also write this as an `async
     // fn` but we've inlined it as an `async` block for simplicity.

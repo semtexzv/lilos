@@ -6,18 +6,17 @@ use core::ops::Not;
 use core::pin::Pin as FuturePin;
 use core::task::{Context, Poll};
 use lilos::exec::Notify;
-use lilos_hal::{ impl_peripheral, into_ref, Peripheral, PeripheralRef};
+use lilos_hal::{impl_peripheral, into_ref, Peripheral, PeripheralRef};
 
-use crate::{interrupt, peripherals, RegExt};
 use crate::interrupt::InterruptExt;
 use crate::pac::common::{Reg, RW};
 use crate::pac::SIO;
+use crate::{interrupt, peripherals, RegExt};
 
 const BANK0_PIN_COUNT: usize = 30;
 
 const NEW_NOTIFY: Notify = Notify::new();
 pub static BANK0_WAKERS: [Notify; BANK0_PIN_COUNT] = [NEW_NOTIFY; BANK0_PIN_COUNT];
-
 
 /// Represents a digital input or output level.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]

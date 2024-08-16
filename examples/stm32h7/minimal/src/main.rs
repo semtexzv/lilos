@@ -40,9 +40,7 @@ fn main() -> ! {
     cortex_m::asm::dmb();
 
     // Configure our output pin, B0.
-    device::GPIOB
-        .moder()
-        .modify(|w| w.set_moder(0, Moder::OUTPUT));
+    device::GPIOB.moder().modify(|w| w.set_moder(0, Moder::OUTPUT));
 
     // Create a task to blink the LED. You could also write this as an `async
     // fn` but we've inlined it as an `async` block for simplicity.

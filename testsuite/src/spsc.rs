@@ -45,8 +45,7 @@ pub async fn test_static_everything() {
     static mut Q: MaybeUninit<Queue<u8>> = MaybeUninit::uninit();
     let q = unsafe {
         let q = &mut *addr_of_mut!(Q);
-        q.as_mut_ptr()
-            .write(Queue::new(&mut *addr_of_mut!(STORAGE)));
+        q.as_mut_ptr().write(Queue::new(&mut *addr_of_mut!(STORAGE)));
         &mut *q.as_mut_ptr()
     };
     test_wherever(q).await
@@ -85,8 +84,7 @@ pub async fn test_nonempty_drop() {
 
     // Safety: assume_init is safe if the resulting type doesn't assume
     // initialization, which an array of MaybeUninit does not.
-    let mut storage: [MaybeUninit<_>; N + 1] =
-        unsafe { MaybeUninit::uninit().assume_init() };
+    let mut storage: [MaybeUninit<_>; N + 1] = unsafe { MaybeUninit::uninit().assume_init() };
 
     let mut q = Queue::new(&mut storage);
     let (mut push, mut pop) = q.split();

@@ -90,24 +90,42 @@ use core::task::{Context, Poll};
 use core::time::Duration;
 use portable_atomic::{AtomicBool, AtomicU32, Ordering};
 
-use cortex_m::peripheral::{syst::SystClkSource, SYST};
+use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m_rt::exception;
-use pin_project::pin_project;
 use lilos_list::List;
+use pin_project::pin_project;
+use crate::exec::{cpuid, PerCore, CORES};
 
-/// Bottom 32 bits of the tick counter. Updated by ISR.
-static TICK: AtomicU32 = AtomicU32::new(0);
-/// Top 32 bits of the tick counter. Updated by ISR.
-static EPOCH: AtomicU32 = AtomicU32::new(0);
-/// How much to increment the tick counter by.
-static INCR: AtomicU32 = AtomicU32::new(0);
+struct State {
+    tick: AtomicU32,
+    epoch: AtomicU32,
+    incr: AtomicU32,
+    list_ready: AtomicBool,
+    timer_list: MaybeUninit<List<TickTime>>
+}
 
+static mut STATE: PerCore<State> = PerCore([const {
+    State {
+        tick: AtomicU32::new(0),
+        epoch: AtomicU32::new(0),
+        incr: AtomicU32::new(0),
+        list_ready: AtomicBool::new(false),
+        timer_list: MaybeUninit::uninit(),
+    }
+}; CORES]);
 
-/// Tracks whether the timer list has been initialized.
-static TIMER_LIST_READY: AtomicBool = AtomicBool::new(false);
-
-/// Storage for the timer list.
-static mut TIMER_LIST: MaybeUninit<List<TickTime>> = MaybeUninit::uninit();
+// /// Bottom 32 bits of the tick counter. Updated by ISR.
+// static TICK: PerCore<AtomicU32> =  PerCore(const {} AtomicU32::new(0));
+// /// Top 32 bits of the tick counter. Updated by ISR.
+// static EPOCH: PerCore<AtomicU32> = PerCore([const { AtomicU32::new(0) }; CORES]);
+// /// How much to increment the tick counter by.
+// static INCR: PerCore<AtomicU32> = PerCore([const { AtomicU32::new(0) }; CORES]);
+//
+// /// Tracks whether the timer list has been initialized.
+// static TIMER_LIST_READY: PerCore<AtomicBool> = AtomicBool::new(false);
+//
+// /// Storage for the timer list.
+// static mut TIMER_LIST: MaybeUninit<List<TickTime>> = MaybeUninit::uninit();
 
 /// Panics if called from an interrupt service routine (ISR). This is used to
 /// prevent OS features that are unavailable to ISRs from being used in ISRs.
@@ -133,14 +151,16 @@ pub(crate) fn get_timer_list() -> Pin<&'static List<TickTime>> {
 
     assert_not_in_isr();
 
+    let state = unsafe { &STATE[cpuid()] };
+
     // Ensure that the timer list has been initialized.
-    cheap_assert!(TIMER_LIST_READY.load(Ordering::Acquire));
+    cheap_assert!(state.list_ready.load(Ordering::Acquire));
 
     // Since we know we're not running concurrently with the scheduler setup, we
     // can freely vend pin references to the now-immortal timer list.
     //
     // Safety: &mut references to TIMER_LIST have stopped after initialization.
-    let list_ref = unsafe { &*addr_of!(TIMER_LIST) };
+    let list_ref = unsafe { &*addr_of!(state.timer_list) };
     // Safety: we know the list has been initialized because we checked
     // TIMER_LIST_READY, above. We also know that the list trivially meets the
     // pin criterion, since it's immortal and always referenced by shared
@@ -148,14 +168,30 @@ pub(crate) fn get_timer_list() -> Pin<&'static List<TickTime>> {
     unsafe { Pin::new_unchecked(list_ref.assume_init_ref()) }
 }
 
-/// Implements executor hooks to aallow asynchronous delays using the systick timer. Accuracy should be in milliseconds
+/// Implements executor hooks to aallow asynchronous delays using the systick timer. Accuracy should be in milliseconds.
+///
+/// WARNING: This will call [cortex_m::Peripherals::steal] on initialization.
+/// If you use [cortex_m::Peripherals::take] afterward, your application will crash
 #[derive(Debug)]
-pub struct SysTick;
+pub struct SysTick { clock_hz: u32 }
 
 impl SysTick {
-    pub fn new(syst: &mut SYST, clock_hz: u32) -> Self {
-        let cycles = clock_hz / 1_000;
-        INCR.store(1_000, Ordering::Relaxed);
+    /// Initializes systick timer, and returns [crate::exec::Hooks] that should be
+    /// provided to the executor in order to drive the timer scheduling.
+    ///
+    /// SysTick is not a reliable timing mechanism when the core is put into deep sleep
+    /// If you can, prefer using the individual chip timing mechanisms.
+    pub fn initialize(clock_hz: u32) -> Self {
+        SysTick { clock_hz }
+    }
+}
+
+impl crate::exec::Hooks for SysTick {
+    fn init_core(&self, _: usize) {
+        let state = unsafe { &mut STATE[cpuid()] };
+        let mut syst = unsafe { cortex_m::Peripherals::steal().SYST };
+        let cycles = self.clock_hz / 1_000;
+        state.incr.store(1_000, Ordering::Relaxed);
 
         syst.disable_counter();
         syst.set_clock_source(SystClkSource::Core);
@@ -164,13 +200,8 @@ impl SysTick {
         syst.clear_current();
         syst.enable_interrupt();
         syst.enable_counter();
-        SysTick
-    }
-}
 
-impl crate::exec::Hooks for SysTick {
-    fn init_core(&self, _: usize) {
-        let already_initialized = TIMER_LIST_READY.swap(true, Ordering::SeqCst);
+        let already_initialized = state.list_ready.swap(true, Ordering::SeqCst);
         // Catch any attempt to do this twice. Would doing this twice be bad?
         // Not necessarily. But it would be damn suspicious.
         cheap_assert!(!already_initialized);
@@ -178,7 +209,7 @@ impl crate::exec::Hooks for SysTick {
         // Safety: by successfully flipping the initialization flag, we know
         // we can do this without aliasing; being in a single-threaded context
         // right now means we can do it without racing.
-        let timer_list = unsafe { &mut *addr_of_mut!(TIMER_LIST) };
+        let timer_list = unsafe { &mut *addr_of_mut!(state.timer_list) };
 
         // Initialize the list node itself.
         timer_list.write(List::new());
@@ -190,8 +221,7 @@ impl crate::exec::Hooks for SysTick {
         get_timer_list().wake_while(|&t| t <= now);
     }
 
-    fn after_poll(&self, core: usize) {
-    }
+    fn after_poll(&self, _: usize) {}
 }
 
 /// Represents a moment in time by the value of the system tick counter.
@@ -202,13 +232,14 @@ pub struct TickTime(u64);
 impl TickTime {
     /// Retrieves the current value of the tick counter.
     pub fn now() -> Self {
+        let state = unsafe { &STATE[cpuid()] };
         // This loop will only repeat if e != e2, which means we raced the
         // systick ISR. Since that ISR only occurs once per millisecond, this
         // loop should repeat at most twice.
         loop {
-            let e = EPOCH.load(Ordering::SeqCst);
-            let t = TICK.load(Ordering::SeqCst);
-            let e2 = EPOCH.load(Ordering::SeqCst);
+            let e = state.epoch.load(Ordering::SeqCst);
+            let t = state.tick.load(Ordering::SeqCst);
+            let e2 = state.epoch.load(Ordering::SeqCst);
             if e == e2 {
                 break TickTime(((e as u64) << 32) | (t as u64));
             }
@@ -416,10 +447,7 @@ where
 /// In this case, `await` drops the future as soon as it resolves (as always),
 /// which means the nested `some_operation()` future will be promptly dropped
 /// when we notice that the deadline has been met or exceeded.
-pub fn with_deadline<F>(
-    deadline: TickTime,
-    code: F,
-) -> impl Future<Output = Option<F::Output>>
+pub fn with_deadline<F>(deadline: TickTime, code: F) -> impl Future<Output = Option<F::Output>>
 where
     F: Future,
 {
@@ -437,10 +465,7 @@ where
 /// as the deadline for the returned future.
 ///
 /// See [`with_deadline`] for more details.
-pub fn with_timeout<D, F>(
-    timeout: D,
-    code: F,
-) -> impl Future<Output = Option<F::Output>>
+pub fn with_timeout<D, F>(timeout: D, code: F) -> impl Future<Output = Option<F::Output>>
 where
     F: Future,
     TickTime: Add<D, Output = TickTime>,
@@ -598,8 +623,10 @@ impl embedded_hal_async::delay::DelayNs for Delay {
 #[doc(hidden)]
 #[exception]
 fn SysTick() {
-    let incr = INCR.load(Ordering::Acquire);
-    if TICK.fetch_add(incr, Ordering::Release) < incr {
-        EPOCH.fetch_add(1, Ordering::Release);
+    let state = unsafe { &STATE[cpuid()] };
+
+    let incr = state.incr.load(Ordering::Acquire);
+    if state.tick.fetch_add(incr, Ordering::Release) < incr {
+        state.epoch.fetch_add(1, Ordering::Release);
     }
 }

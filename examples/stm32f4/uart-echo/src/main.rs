@@ -81,29 +81,18 @@ fn main() -> ! {
 
     // Create and pin tasks.
     let heartbeat = pin!(heartbeat(device::RCC, device::GPIOD));
-    let echo = pin!(usart_echo(
-        device::RCC,
-        device::GPIOA,
-        device::USART2,
-        CLOCK_HZ,
-    ));
+    let echo = pin!(usart_echo(device::RCC, device::GPIOA, device::USART2, CLOCK_HZ,));
 
     device::RCC.ahb1enr().modify(|w| w.set_gpioden(true));
-    device::GPIOD
-        .moder()
-        .modify(|w| w.set_moder(15, Moder::OUTPUT));
+    device::GPIOD.moder().modify(|w| w.set_moder(15, Moder::OUTPUT));
 
     // Set up and run the scheduler.
     lilos::time::initialize_sys_tick(&mut cp.SYST, CLOCK_HZ);
-    lilos::exec::run_tasks_with_idle(
-        &mut [heartbeat, echo],
-        lilos::exec::ALL_TASKS,
-        || {
-            device::GPIOD.bsrr().write(|w| w.set_br(15, true));
-            cortex_m::asm::wfi();
-            device::GPIOD.bsrr().write(|w| w.set_bs(15, true));
-        },
-    )
+    lilos::exec::run_tasks_with_idle(&mut [heartbeat, echo], lilos::exec::ALL_TASKS, || {
+        device::GPIOD.bsrr().write(|w| w.set_br(15, true));
+        cortex_m::asm::wfi();
+        device::GPIOD.bsrr().write(|w| w.set_bs(15, true));
+    })
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -111,10 +100,7 @@ fn main() -> ! {
 
 /// Pulses a GPIO pin connected to an LED, to show that the scheduler is still
 /// running, etc.
-fn heartbeat(
-    rcc: device::rcc::Rcc,
-    gpiod: device::gpio::Gpio,
-) -> impl Future<Output = Infallible> {
+fn heartbeat(rcc: device::rcc::Rcc, gpiod: device::gpio::Gpio) -> impl Future<Output = Infallible> {
     // This is implemented using an explicit `async` block, instead of as an
     // `async fn`, to make it clear which actions occur during setup, and which
     // are ongoing. In particular, we only need to borrow the RCC for *setup*
@@ -157,8 +143,7 @@ async fn usart_echo(
     rcc.apb1enr().modify(|w| w.set_usart2en(true));
     // Calculate baud rate divisor for the given peripheral clock. (Using the
     // default 16x oversampling this calculation is pretty straightforward.)
-    let cycles_per_bit = u16::try_from(clock_hz / BAUD_RATE)
-        .expect("can't achieve requested baud rate");
+    let cycles_per_bit = u16::try_from(clock_hz / BAUD_RATE).expect("can't achieve requested baud rate");
     usart.brr().write(|w| w.set_brr(cycles_per_bit));
     // Turn on the USART engine, transmitter, and receiver.
     usart.cr1().write(|w| {
@@ -215,20 +200,14 @@ async fn usart_echo(
 }
 
 /// Echo receive task. Moves bytes from `usart` to `q`.
-async fn echo_rx(
-    usart: device::usart::Usart,
-    mut q: spsc::Pusher<'_, u8>,
-) -> Infallible {
+async fn echo_rx(usart: device::usart::Usart, mut q: spsc::Pusher<'_, u8>) -> Infallible {
     loop {
         q.reserve().await.push(recv(usart).await);
     }
 }
 
 /// Echo transmit task. Moves bytes from `q` to `usart`.
-async fn echo_tx(
-    usart: device::usart::Usart,
-    mut q: spsc::Popper<'_, u8>,
-) -> Infallible {
+async fn echo_tx(usart: device::usart::Usart, mut q: spsc::Popper<'_, u8>) -> Infallible {
     loop {
         send(usart, q.pop().await).await;
     }

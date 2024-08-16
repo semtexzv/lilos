@@ -5,9 +5,9 @@ authors = ["Michal Hornicky <semtexzv@gmail.com>"]
 description = "A chip support crate for RP2040 on lilos"
 keywords = ["async", "embedded", "os"]
 categories = ["embedded", "no-std"]
+license = "MIT OR Apache-2.0"
 
 edition.workspace = true
-license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
@@ -31,7 +31,6 @@ cortex-m.workspace = true
 cortex-m-rt.workspace =  true
 rp-pac.workspace = true
 
-
 defmt = { version = "0.3.8", optional = true}
 log = { version = "0.4.22", optional = true }
 
@@ -46,6 +45,9 @@ rp2040 = ["rp-pac/rp2040"]
 rp235x = ["rp-pac/rp235x"]
 rp235xb = ["rp-pac/rp235x"]
 
+multicore = ["lilos/multicore"]
+
+_test = []
 qspi-as-gpio = []
 
 [lib]
